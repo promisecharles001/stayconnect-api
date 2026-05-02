@@ -1,0 +1,306 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 String              @id @default(uuid())
+  email              String              @unique
+  password           String
+  firstName          String
+  lastName           String
+  phone              String?
+  avatarUrl          String?
+  roleId             String
+  status             UserStatus          @default(PENDING_VERIFICATION)
+  emailVerified      Boolean             @default(false)
+  emailVerifiedAt    DateTime?
+  phoneVerified      Boolean             @default(false)
+  phoneVerifiedAt    DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  lastLoginAt        DateTime?
+  hostSince          DateTime?
+  hostBio            String?
+  hostRating         Float?              @default(0)
+  hostReviewCount    Int?                @default(0)
+  guestRating        Float?              @default(0)
+  guestReviewCount   Int?                @default(0)
+  bookings           Booking[]           @relation("GuestBookings")
+  hostBookings       Booking[]           @relation("HostBookings")
+  earnings           EarningsLedger[]
+  kycVerification    KYCVerification?
+  properties         Property[]
+  role               Role                @relation(fields: [roleId], references: [id])
+  withdrawalRequests WithdrawalRequest[]
+  guestConversations Conversation[]      @relation("GuestConversations")
+  hostConversations  Conversation[]      @relation("HostConversations")
+
+  @@index([email])
+  @@index([roleId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  permissions String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  users       User[]
+
+  @@map("roles")
+}
+
+model KYCVerification {
+  id                 String          @id @default(uuid())
+  userId             String          @unique
+  documentType       KYCDocumentType
+  documentNumber     String
+  documentImageFront String
+  documentImageBack  String?
+  dateOfBirth        DateTime?
+  address            String?
+  city               String?
+  state              String?
+  country            String?         @default("Nigeria")
+  status             KYCStatus       @default(PENDING)
+  reviewedBy         String?
+  reviewedAt         DateTime?
+  reviewNotes        String?
+  rejectionReason    String?
+  selfieImage        String?
+  selfieVerified     Boolean         @default(false)
+  submittedAt        DateTime        @default(now())
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  user               User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([userId])
+  @@map("kyc_verifications")
+}
+
+model Property {
+  id                String         @id @default(uuid())
+  hostId            String
+  title             String
+  description       String
+  propertyType      PropertyType
+  address           String
+  city              String
+  state             String
+  country           String         @default("Nigeria")
+  postalCode        String?
+  latitude          Float?
+  longitude         Float?
+  maxGuests         Int
+  bedrooms          Int
+  beds              Int
+  bathrooms         Float
+  amenities         String[]       @default([])
+  houseRules        String?
+  checkInTime       String         @default("14:00")
+  checkOutTime      String         @default("11:00")
+  basePricePerNight Decimal        @db.Decimal(10, 2)
+  cleaningFee       Decimal?       @db.Decimal(10, 2)
+  commissionPercent Decimal        @default(10.00) @db.Decimal(5, 2)
+  status            PropertyStatus @default(DRAFT)
+  images            String[]       @default([])
+  averageRating     Float          @default(0)
+  reviewCount       Int            @default(0)
+  isInstantBook     Boolean        @default(false)
+  minNights         Int            @default(1)
+  maxNights         Int?
+  reviewedBy        String?
+  reviewedAt        DateTime?
+  reviewNotes       String?
+  rejectionReason   String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  publishedAt       DateTime?
+  bookings          Booking[]
+  conversations     Conversation[]
+  host              User           @relation(fields: [hostId], references: [id], onDelete: Cascade)
+
+  @@index([hostId])
+  @@index([status])
+  @@index([city])
+  @@index([propertyType])
+  @@index([basePricePerNight])
+  @@index([createdAt])
+  @@map("properties")
+}
+
+model Booking {
+  id               String        @id @default(uuid())
+  guestId          String
+  hostId           String
+  propertyId       String
+  startDate        DateTime
+  endDate          DateTime
+  totalAmount      Decimal       @db.Decimal(10, 2)
+  commissionAmount Decimal       @db.Decimal(10, 2)
+  status           BookingStatus @default(PENDING)
+  paymentProof     String?
+  paymentVerified  Boolean       @default(false)
+  verifiedAt       DateTime?
+  verifiedBy       String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  guest            User          @relation("GuestBookings", fields: [guestId], references: [id])
+  host             User          @relation("HostBookings", fields: [hostId], references: [id])
+  property         Property      @relation(fields: [propertyId], references: [id])
+
+  @@index([guestId])
+  @@index([hostId])
+  @@index([propertyId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("bookings")
+}
+
+model EarningsLedger {
+  id            String   @id @default(uuid())
+  hostId        String
+  amount        Decimal  @db.Decimal(10, 2)
+  type          String
+  description   String
+  bookingId     String?
+  balanceBefore Decimal  @db.Decimal(10, 2)
+  balanceAfter  Decimal  @db.Decimal(10, 2)
+  withdrawalId  String?
+  createdAt     DateTime @default(now())
+  host          User     @relation(fields: [hostId], references: [id])
+
+  @@index([hostId])
+  @@index([createdAt])
+  @@map("earnings_ledger")
+}
+
+model WithdrawalRequest {
+  id                String           @id @default(uuid())
+  hostId            String
+  amount            Decimal          @db.Decimal(10, 2)
+  currency          String           @default("NGN")
+  bankName          String
+  bankCode          String
+  accountNumber     String
+  accountName       String
+  status            WithdrawalStatus @default(PENDING)
+  processedAt       DateTime?
+  processedBy       String?
+  transferReference String?
+  transferReceipt   String?
+  failureReason     String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  host              User             @relation(fields: [hostId], references: [id])
+
+  @@index([hostId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("withdrawal_requests")
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PENDING_VERIFICATION
+}
+
+enum KYCStatus {
+  PENDING
+  IN_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum KYCDocumentType {
+  NIN_SLIP
+  DRIVERS_LICENSE
+  INTERNATIONAL_PASSPORT
+  VOTERS_CARD
+}
+
+enum PropertyType {
+  APARTMENT
+  HOUSE
+  VILLA
+  CONDO
+  STUDIO
+  HOTEL
+  RESORT
+  GUEST_HOUSE
+  HOSTEL
+  OTHER
+}
+
+enum PropertyStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  SUSPENDED
+  INACTIVE
+}
+
+enum BookingStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  COMPLETED
+}
+
+enum WithdrawalStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model Conversation {
+  id          String    @id @default(uuid())
+  propertyId  String
+  guestId     String
+  hostId      String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  property    Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  guest       User      @relation("GuestConversations", fields: [guestId], references: [id], onDelete: Cascade)
+  host        User      @relation("HostConversations", fields: [hostId], references: [id], onDelete: Cascade)
+  messages    Message[]
+
+  @@index([propertyId])
+  @@index([guestId])
+  @@index([hostId])
+  @@index([updatedAt])
+  @@unique([propertyId, guestId, hostId])
+  @@map("conversations")
+}
+
+model Message {
+  id              String       @id @default(uuid())
+  conversationId  String
+  senderId        String
+  content         String
+  isRead          Boolean      @default(false)
+  readAt          DateTime?
+  createdAt       DateTime     @default(now())
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([senderId])
+  @@index([createdAt])
+  @@map("messages")
+}

@@ -1,0 +1,85 @@
+services:
+  - type: web
+    name: stayconnect-ng-api
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: npm install && npm run build && npx prisma migrate deploy && npx prisma db seed
+    startCommand: npm run start:prod
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: API_PREFIX
+        value: api
+      - key: API_VERSION
+        value: v1
+      - key: DATABASE_URL
+        fromDatabase:
+          name: stayconnect-ng-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_EXPIRATION
+        value: 15m
+      - key: JWT_REFRESH_EXPIRATION
+        value: 7d
+      - key: CORS_ORIGIN
+        value: "*"
+      - key: RATE_LIMIT_TTL
+        value: 60
+      - key: RATE_LIMIT_MAX
+        value: 100
+      - key: MAX_FILE_SIZE
+        value: 5242880
+      - key: UPLOAD_DEST
+        value: ./uploads
+      - key: DEFAULT_ADMIN_EMAIL
+        value: stayconnectng@gmail.com
+      - key: DEFAULT_ADMIN_PASSWORD
+        value: Mylove2u.
+      - key: ADMIN_EMAIL
+        value: stayconnectng@gmail.com
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_USER
+        value: stayconnectng@gmail.com
+      - key: CLOUDINARY_CLOUD_NAME
+        value: da1rako6c
+      - key: CLOUDINARY_API_KEY
+        value: 427477122634898
+      - key: LIVEKIT_API_KEY
+        value: API3fmkDyaiP74M
+      - key: LIVEKIT_URL
+        value: wss://stayconnect-grnkwxe8.livekit.cloud
+      - key: LIVEKIT_PROJECT_ID
+        value: p_x3k379sp759
+      - key: LIVEKIT_SIP_URI
+        value: sip:x3k379sp759.sip.livekit.cloud
+      - key: LIVEKIT_TOKEN_EXPIRATION
+        value: 3600
+      - key: BANK_NAME
+        value: Fidelity Bank
+      - key: BANK_ACCOUNT_NUMBER
+        value: 5601704103
+      - key: BANK_ACCOUNT_NAME
+        value: StayConnect Technologies
+      - key: AGORA_APP_ID
+        value: 8e3680796123404cb8348727dfa8c665
+      - key: GOOGLE_MAPS_API_KEY
+        value: AIzaSyC6ZZztJuF0zvmFobROY5l0YjvpOmhNFKA
+      - key: EXPO_PUBLIC_API_URL
+        value: https://stayconnect-ng-api.onrender.com/api/v1
+
+databases:
+  - name: stayconnect-ng-db
+    databaseName: stayconnect_ng
+    user: stayconnect
+    plan: free
+    region: oregon
+    ipAllowList: []
