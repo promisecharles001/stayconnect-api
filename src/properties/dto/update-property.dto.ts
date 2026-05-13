@@ -76,6 +76,16 @@ export class UpdatePropertyDto {
   @IsString({ each: true })
   amenities?: string[];
 
+  @ApiProperty({
+    example: ['data:image/jpeg;base64,/9j/4AAQ...'],
+    required: false,
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  images?: string[];
+
   @ApiProperty({ example: 'No smoking', required: false })
   @IsOptional()
   @IsString()

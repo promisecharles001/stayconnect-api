@@ -94,7 +94,7 @@ export class CreatePropertyDto {
   })
   @IsOptional()
   @IsArray()
-  @IsUrl({}, { each: true })
+  @IsString({ each: true })
   images?: string[];
 
   @ApiProperty({ example: 'No smoking, No pets', required: false })
