@@ -43,7 +43,7 @@ export class AuthService {
   ) {}
 
   async register(registerDto: RegisterDto): Promise<AuthResponseDto> {
-    const { email, password, firstName, lastName, phone } = registerDto;
+    const { email, password, firstName, lastName, phone, role } = registerDto;
 
     // Check if user already exists
     const existingUser = await this.prisma.user.findUnique({
@@ -66,15 +66,16 @@ export class AuthService {
     // Hash password
     const hashedPassword = await PasswordUtil.hash(password);
 
-    // Get default guest role
-    const guestRole = await this.prisma.role.findUnique({
-      where: { name: 'GUEST' },
+    // Determine role — default to GUEST if not provided or invalid
+    const roleName = role && ['ADMIN', 'HOST', 'GUEST'].includes(role) ? role : 'GUEST';
+    const assignedRole = await this.prisma.role.findUnique({
+      where: { name: roleName },
     });
 
-    if (!guestRole) {
-      this.logger.error('Default "GUEST" role not found in database');
+    if (!assignedRole) {
+      this.logger.error(`Role "${roleName}" not found in database`);
       throw new NotFoundException(
-        'Default guest role not found. Please run database seed: npm run prisma:seed',
+        `Role "${roleName}" not found. Please run database seed: npm run prisma:seed`,
       );
     }
 
@@ -86,7 +87,7 @@ export class AuthService {
         firstName,
         lastName,
         phone,
-        roleId: guestRole.id,
+        roleId: assignedRole.id,
         status: UserStatus.PENDING_VERIFICATION,
       },
       include: {

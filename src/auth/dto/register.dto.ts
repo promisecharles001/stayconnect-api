@@ -52,4 +52,14 @@ export class RegisterDto {
   @IsOptional()
   @IsEnum(UserStatus, { message: 'Invalid user status' })
   status?: UserStatus;
+
+  @ApiProperty({ 
+    example: 'GUEST', 
+    description: 'User role', 
+    enum: ['ADMIN', 'HOST', 'GUEST'],
+    required: false 
+  })
+  @IsOptional()
+  @IsEnum(['ADMIN', 'HOST', 'GUEST'], { message: 'Invalid user role. Must be ADMIN, HOST, or GUEST' })
+  role?: 'ADMIN' | 'HOST' | 'GUEST';
 }
