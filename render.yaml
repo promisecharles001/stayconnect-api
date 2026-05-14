@@ -49,6 +49,10 @@ services:
         value: 587
       - key: SMTP_USER
         value: stayconnectng@gmail.com
+      - key: SMTP_PASS
+        value: your-gmail-app-password
+      - key: APP_NAME
+        value: StayConnect NG
       - key: CLOUDINARY_CLOUD_NAME
         value: da1rako6c
       - key: CLOUDINARY_API_KEY
