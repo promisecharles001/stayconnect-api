@@ -53,6 +53,8 @@ services:
         value: da1rako6c
       - key: CLOUDINARY_API_KEY
         value: 427477122634898
+      - key: CLOUDINARY_API_SECRET
+        value: ZTKmDWQCJN-s5P5V0ZVpjqFPXmc
       - key: LIVEKIT_API_KEY
         value: API3fmkDyaiP74M
       - key: LIVEKIT_URL

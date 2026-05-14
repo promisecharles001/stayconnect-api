@@ -25,6 +25,35 @@ export class PropertiesService {
     private readonly notificationService: NotificationService,
   ) {}
 
+  private async geocodeAddress(address: string, city: string, state: string): Promise<{ lat: number; lng: number } | null> {
+    try {
+      const apiKey = this.configService.get<string>('GOOGLE_MAPS_API_KEY');
+      if (!apiKey) {
+        this.logger.warn('GOOGLE_MAPS_API_KEY not configured, skipping geocoding');
+        return null;
+      }
+
+      const fullAddress = `${address}, ${city}, ${state}, Nigeria`;
+      const encodedAddress = encodeURIComponent(fullAddress);
+      const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodedAddress}&key=${apiKey}`;
+
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (data.status === 'OK' && data.results.length > 0) {
+        const location = data.results[0].geometry.location;
+        this.logger.log(`Geocoded address: ${fullAddress} -> ${location.lat}, ${location.lng}`);
+        return { lat: location.lat, lng: location.lng };
+      }
+
+      this.logger.warn(`Geocoding failed for: ${fullAddress} — status: ${data.status}`);
+      return null;
+    } catch (error) {
+      this.logger.error('Geocoding error:', error);
+      return null;
+    }
+  }
+
   async create(hostId: string, createPropertyDto: CreatePropertyDto): Promise<PropertyResponseDto> {
     // Check if host exists and is approved
     const host = await this.prisma.user.findUnique({
@@ -41,6 +70,13 @@ export class PropertiesService {
       throw new ForbiddenException('Host KYC verification is required before listing properties. Please complete your verification first.');
     }
 
+    // Geocode address for map search
+    const coords = await this.geocodeAddress(
+      createPropertyDto.address,
+      createPropertyDto.city,
+      createPropertyDto.state,
+    );
+
     // Create property
     const property = await this.prisma.property.create({
       data: {
@@ -50,6 +86,8 @@ export class PropertiesService {
         basePricePerNight: new Decimal(createPropertyDto.basePricePerNight.toString()),
         cleaningFee: createPropertyDto.cleaningFee ? new Decimal(createPropertyDto.cleaningFee.toString()) : null,
         images: createPropertyDto.images || [],
+        latitude: coords?.lat ?? null,
+        longitude: coords?.lng ?? null,
       },
     });
 
