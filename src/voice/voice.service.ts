@@ -27,7 +27,9 @@ export class VoiceService {
   constructor(private readonly configService: ConfigService) {
     this.apiKey = this.configService.get<string>('LIVEKIT_API_KEY') || '';
     this.apiSecret = this.configService.get<string>('LIVEKIT_API_SECRET') || '';
-    this.serverUrl = this.configService.get<string>('LIVEKIT_SERVER_URL') || '';
+    this.serverUrl = this.configService.get<string>('LIVEKIT_SERVER_URL')
+      || this.configService.get<string>('LIVEKIT_URL')
+      || '';
     this.tokenExpiration = this.configService.get<number>('LIVEKIT_TOKEN_EXPIRATION') || 3600;
 
     if (!this.apiKey) {
