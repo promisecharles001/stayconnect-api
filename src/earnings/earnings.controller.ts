@@ -3,7 +3,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { EarningsService } from './earnings.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ApiPaginatedResponse } from '../common/decorators/api-paginated-response.decorator';
-import { EarningsLedgerDto, EarningsSummaryDto } from './dto/earnings-response.dto';
+import { EarningsLedgerDto, EarningsSummaryDto, BookingEarningDto } from './dto/earnings-response.dto';
 
 @ApiTags('Earnings')
 @Controller('earnings')
@@ -20,6 +20,20 @@ export class EarningsController {
     @Query('limit') limit = 10,
   ) {
     return this.earningsService.getEarningsLedger(hostId, {
+      page: parseInt(page as any, 10),
+      limit: parseInt(limit as any, 10),
+    });
+  }
+
+  @Get('bookings')
+  @ApiOperation({ summary: 'Get earnings from bookings' })
+  @ApiPaginatedResponse(BookingEarningDto)
+  async getEarningsBookings(
+    @CurrentUser('id') hostId: string,
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+  ) {
+    return this.earningsService.getEarningsBookings(hostId, {
       page: parseInt(page as any, 10),
       limit: parseInt(limit as any, 10),
     });

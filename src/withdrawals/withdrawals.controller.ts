@@ -40,6 +40,20 @@ export class WithdrawalsController {
     return this.withdrawalsService.create(hostId, createWithdrawalDto);
   }
 
+  @Get()
+  @ApiOperation({ summary: 'Get my withdrawal requests (alias for /my-withdrawals)' })
+  @ApiPaginatedResponse(WithdrawalResponseDto)
+  async findMyWithdrawalsRoot(
+    @CurrentUser('id') hostId: string,
+    @Query('page') page = 1,
+    @Query('limit') limit = 10,
+  ) {
+    return this.withdrawalsService.findByHost(hostId, {
+      page: parseInt(page as any, 10),
+      limit: parseInt(limit as any, 10),
+    });
+  }
+
   @Get('my-withdrawals')
   @ApiOperation({ summary: 'Get my withdrawal requests' })
   @ApiPaginatedResponse(WithdrawalResponseDto)

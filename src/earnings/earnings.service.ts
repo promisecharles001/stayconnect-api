@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { BookingStatus } from '@prisma/client';
 import { PaginationUtil, PaginatedResult } from '../common/utils/pagination.util';
-import { EarningsLedgerDto, EarningsSummaryDto } from './dto/earnings-response.dto';
+import { EarningsLedgerDto, EarningsSummaryDto, BookingEarningDto } from './dto/earnings-response.dto';
 
 @Injectable()
 export class EarningsService {
@@ -104,6 +104,56 @@ export class EarningsService {
       thisMonthEarnings,
       lastMonthEarnings,
     };
+  }
+
+  async getEarningsBookings(
+    hostId: string,
+    options: { page: number; limit: number },
+  ): Promise<PaginatedResult<BookingEarningDto>> {
+    const { page, limit } = options;
+    const skip = PaginationUtil.calculateSkip({ page, limit });
+
+    const [bookings, total] = await Promise.all([
+      this.prisma.booking.findMany({
+        where: { hostId },
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          property: { select: { title: true } },
+          guest: { select: { firstName: true, lastName: true } },
+        },
+      }),
+      this.prisma.booking.count({ where: { hostId } }),
+    ]);
+
+    const data = bookings.map((booking) => ({
+      id: booking.id,
+      propertyTitle: booking.property?.title || 'Unknown Property',
+      guestName: `${booking.guest?.firstName || ''} ${booking.guest?.lastName || ''}`.trim() || 'Unknown Guest',
+      amount: Number(booking.totalAmount),
+      platformFee: Number(booking.commissionAmount),
+      hostAmount: Number(booking.totalAmount) - Number(booking.commissionAmount),
+      status: this.mapBookingStatusToEarningStatus(booking.status),
+      createdAt: booking.createdAt,
+    }));
+
+    return PaginationUtil.createResult(data, total, { page, limit });
+  }
+
+  private mapBookingStatusToEarningStatus(status: BookingStatus): string {
+    switch (status) {
+      case 'PENDING':
+        return 'PENDING';
+      case 'ACCEPTED':
+        return 'AVAILABLE';
+      case 'COMPLETED':
+        return 'AVAILABLE';
+      case 'REJECTED':
+        return 'CANCELLED';
+      default:
+        return 'PENDING';
+    }
   }
 
   async addEarning(

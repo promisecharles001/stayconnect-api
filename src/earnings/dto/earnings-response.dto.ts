@@ -1,5 +1,31 @@
 import { ApiProperty } from '@nestjs/swagger';
 
+export class BookingEarningDto {
+  @ApiProperty()
+  id: string;
+
+  @ApiProperty()
+  propertyTitle: string;
+
+  @ApiProperty()
+  guestName: string;
+
+  @ApiProperty()
+  amount: number;
+
+  @ApiProperty()
+  platformFee: number;
+
+  @ApiProperty()
+  hostAmount: number;
+
+  @ApiProperty()
+  status: string;
+
+  @ApiProperty()
+  createdAt: Date;
+}
+
 export class EarningsLedgerDto {
   @ApiProperty()
   id: string;
