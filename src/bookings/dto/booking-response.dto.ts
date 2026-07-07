@@ -6,7 +6,7 @@ export class BookingResponseDto {
   id: string;
 
   @ApiProperty()
-  guestId: string;
+  visitorId: string;
 
   @ApiProperty()
   hostId: string;
@@ -52,5 +52,23 @@ export class BookingResponseDto {
     id: string;
     title: string;
     images: string[];
+  };
+
+  @ApiProperty({ type: 'object', nullable: true })
+  host?: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone?: string;
+  };
+
+  @ApiProperty({ type: 'object', nullable: true })
+  visitor?: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone?: string;
   };
 }

@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 
 interface NotificationPayload {
-  type: 'KYC_SUBMITTED' | 'PROPERTY_SUBMITTED' | 'KYC_REVIEWED' | 'PROPERTY_REVIEWED';
+  type: 'KYC_SUBMITTED' | 'PROPERTY_SUBMITTED' | 'KYC_REVIEWED' | 'PROPERTY_REVIEWED' | 'PASSWORD_RESET';
   recipientEmail: string;
   subject: string;
   message: string;
@@ -26,7 +26,18 @@ export class NotificationService {
     const smtpPass = this.configService.get<string>('SMTP_PASS');
 
     if (!smtpHost || !smtpUser || !smtpPass) {
-      this.logger.warn('SMTP not fully configured. Email notifications will be logged only.');
+      this.logger.warn('SMTP not configured — emails will only be logged, not sent.');
+      return;
+    }
+
+    // Detect the literal placeholder from .env.example — a common mistake
+    if (smtpPass === 'your-app-password' || smtpPass.toLowerCase().includes('placeholder')) {
+      this.logger.warn(
+        'SMTP_PASS is still set to a placeholder value. ' +
+        'For Gmail, generate a 16-char App Password at ' +
+        'https://myaccount.google.com/apppasswords (requires 2FA). ' +
+        'Emails will be logged only until this is fixed.'
+      );
       return;
     }
 
@@ -40,7 +51,7 @@ export class NotificationService {
       },
     });
 
-    this.logger.log('SMTP transporter initialized');
+    this.logger.log(`SMTP transporter initialized (${smtpUser})`);
   }
 
   async sendAdminNotification(payload: NotificationPayload): Promise<void> {
@@ -98,6 +109,19 @@ export class NotificationService {
       subject: `New Property Listing Submitted - ${propertyTitle}`,
       message: `A new property "${propertyTitle}" has been submitted by ${hostName} (${hostEmail}). Please review it in the admin dashboard before it goes live.`,
       data: { propertyTitle, hostName, hostEmail },
+    });
+  }
+
+  async sendPasswordResetEmail(email: string, resetLink: string): Promise<void> {
+    await this.sendAdminNotification({
+      type: 'PASSWORD_RESET',
+      recipientEmail: email,
+      subject: 'Reset your StayConnect NG password',
+      message:
+        `We received a request to reset your password. Tap the link below to choose a new one ` +
+        `(this link expires in 1 hour):\n\n${resetLink}\n\n` +
+        `If you didn't request this, you can safely ignore this email — your password won't be changed.`,
+      data: { resetLink },
     });
   }
 }

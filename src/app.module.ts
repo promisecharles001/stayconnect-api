@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD, APP_FILTER, APP_PIPE } from '@nestjs/core';
 
 // Configuration
@@ -21,6 +22,7 @@ import { WithdrawalsModule } from './withdrawals/withdrawals.module';
 import { AdminModule } from './admin/admin.module';
 import { VoiceModule } from './voice/voice.module';
 import { MessagesModule } from './messages/messages.module';
+import { ReviewsModule } from './reviews/reviews.module';
 
 // Guards & Filters
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -36,6 +38,9 @@ import { createValidationPipe } from './common/pipes/validation.pipe';
       load: [appConfig, databaseConfig, jwtConfig, corsConfig],
       envFilePath: ['.env', '.env.local', `.env.${process.env.NODE_ENV || 'development'}`],
     }),
+
+    // Scheduled tasks (booking auto-completion, etc)
+    ScheduleModule.forRoot(),
 
     // Database
     PrismaModule,
@@ -54,6 +59,7 @@ import { createValidationPipe } from './common/pipes/validation.pipe';
     AdminModule,
     VoiceModule,
     MessagesModule,
+    ReviewsModule,
   ],
   providers: [
     // Global JWT Guard (with @Public() decorator support)

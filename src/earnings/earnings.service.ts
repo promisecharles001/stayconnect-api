@@ -121,7 +121,7 @@ export class EarningsService {
         orderBy: { createdAt: 'desc' },
         include: {
           property: { select: { title: true } },
-          guest: { select: { firstName: true, lastName: true } },
+          visitor: { select: { firstName: true, lastName: true } },
         },
       }),
       this.prisma.booking.count({ where: { hostId } }),
@@ -130,7 +130,7 @@ export class EarningsService {
     const data = bookings.map((booking) => ({
       id: booking.id,
       propertyTitle: booking.property?.title || 'Unknown Property',
-      guestName: `${booking.guest?.firstName || ''} ${booking.guest?.lastName || ''}`.trim() || 'Unknown Guest',
+      visitorName: `${booking.visitor?.firstName || ''} ${booking.visitor?.lastName || ''}`.trim() || 'Unknown Visitor',
       amount: Number(booking.totalAmount),
       platformFee: Number(booking.commissionAmount),
       hostAmount: Number(booking.totalAmount) - Number(booking.commissionAmount),
@@ -228,6 +228,47 @@ export class EarningsService {
     this.logger.log(`Withdrawal deducted for host ${hostId}: ${amount}`);
 
     // Convert Decimal values to numbers for the response
+    return {
+      ...entry,
+      amount: Number(entry.amount),
+      balanceBefore: Number(entry.balanceBefore),
+      balanceAfter: Number(entry.balanceAfter),
+    } as unknown as EarningsLedgerDto;
+  }
+
+  /**
+   * Credit a previously-deducted withdrawal amount back to the host's
+   * available balance. Call this when a withdrawal fails or is cancelled
+   * after the deduction already happened — otherwise the money is gone
+   * from the host's balance with nothing to show for it.
+   */
+  async refundWithdrawal(
+    hostId: string,
+    amount: number,
+    withdrawalId: string,
+  ): Promise<EarningsLedgerDto> {
+    const lastEntry = await this.prisma.earningsLedger.findFirst({
+      where: { hostId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const balanceBefore = lastEntry ? Number(lastEntry.balanceAfter) : 0;
+    const balanceAfter = balanceBefore + amount;
+
+    const entry = await this.prisma.earningsLedger.create({
+      data: {
+        hostId,
+        amount,
+        type: 'withdrawal_refund',
+        description: 'Withdrawal failed — amount refunded to balance',
+        withdrawalId,
+        balanceBefore,
+        balanceAfter,
+      },
+    });
+
+    this.logger.log(`Withdrawal refunded for host ${hostId}: ${amount}`);
+
     return {
       ...entry,
       amount: Number(entry.amount),

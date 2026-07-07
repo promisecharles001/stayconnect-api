@@ -38,10 +38,10 @@ export class RegisterDto {
   @MaxLength(50, { message: 'Last name cannot exceed 50 characters' })
   lastName: string;
 
-  @ApiProperty({ example: '+2348012345678', description: 'Phone number', required: false })
-  @IsOptional()
+  @ApiProperty({ example: '+2348012345678', description: 'Phone number — required so admins can reach you in an emergency' })
+  @IsNotEmpty({ message: 'Phone number is required' })
   @IsPhoneNumber('NG', { message: 'Please provide a valid Nigerian phone number' })
-  phone?: string;
+  phone: string;
 
   @ApiProperty({ 
     example: 'ACTIVE', 
@@ -54,12 +54,12 @@ export class RegisterDto {
   status?: UserStatus;
 
   @ApiProperty({ 
-    example: 'GUEST', 
+    example: 'VISITOR', 
     description: 'User role', 
-    enum: ['ADMIN', 'HOST', 'GUEST'],
+    enum: ['ADMIN', 'HOST', 'VISITOR'],
     required: false 
   })
   @IsOptional()
-  @IsEnum(['ADMIN', 'HOST', 'GUEST'], { message: 'Invalid user role. Must be ADMIN, HOST, or GUEST' })
-  role?: 'ADMIN' | 'HOST' | 'GUEST';
+  @IsEnum(['ADMIN', 'HOST', 'VISITOR'], { message: 'Invalid user role. Must be ADMIN, HOST, or VISITOR' })
+  role?: 'ADMIN' | 'HOST' | 'VISITOR';
 }

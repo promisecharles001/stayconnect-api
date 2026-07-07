@@ -12,6 +12,7 @@ import {
   ParseUUIDPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
+import { Role } from '@prisma/client';
 import { PropertiesService } from './properties.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -94,10 +95,10 @@ export class PropertiesController {
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser('id') hostId: string,
-    @CurrentUser('roleId') userRoleId: string,
+    @CurrentUser('role') userRole: Role,
     @Body() updatePropertyDto: UpdatePropertyDto,
   ): Promise<PropertyResponseDto> {
-    return this.propertiesService.update(id, hostId, userRoleId, updatePropertyDto);
+    return this.propertiesService.update(id, hostId, userRole.name, updatePropertyDto);
   }
 
   @Delete(':id')
@@ -107,9 +108,9 @@ export class PropertiesController {
   async remove(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser('id') hostId: string,
-    @CurrentUser('roleId') userRoleId: string,
+    @CurrentUser('role') userRole: Role,
   ): Promise<void> {
-    return this.propertiesService.remove(id, hostId, userRoleId);
+    return this.propertiesService.remove(id, hostId, userRole.name);
   }
 
   @Patch(':id/review')

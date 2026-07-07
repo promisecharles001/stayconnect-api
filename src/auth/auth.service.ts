@@ -9,8 +9,10 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { UserStatus } from '@prisma/client';
+import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { PasswordUtil } from '../common/utils/password.util';
+import { NotificationService } from '../common/services/notification.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -40,6 +42,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   async register(registerDto: RegisterDto): Promise<AuthResponseDto> {
@@ -66,8 +69,8 @@ export class AuthService {
     // Hash password
     const hashedPassword = await PasswordUtil.hash(password);
 
-    // Determine role — default to GUEST if not provided or invalid
-    const roleName = role && ['ADMIN', 'HOST', 'GUEST'].includes(role) ? role : 'GUEST';
+    // Determine role — default to VISITOR if not provided or invalid
+    const roleName = role && ['ADMIN', 'HOST', 'VISITOR'].includes(role) ? role : 'VISITOR';
     const assignedRole = await this.prisma.role.findUnique({
       where: { name: roleName },
     });
@@ -232,26 +235,76 @@ export class AuthService {
       where: { email },
     });
 
-    // Always return success message to prevent email enumeration
-    if (!user) {
-      return {
-        message: 'If an account exists with this email, you will receive password reset instructions',
-      };
-    }
-
-    // TODO: Generate password reset token and send email
-    this.logger.log(`Password reset requested for: ${email}`);
-
-    return {
+    const genericResponse = {
       message: 'If an account exists with this email, you will receive password reset instructions',
     };
+
+    // Always return the same generic message whether or not the account
+    // exists — returning something different here would let an attacker
+    // enumerate which emails are registered.
+    if (!user) {
+      return genericResponse;
+    }
+
+    // Store only a hash of the token (same principle as passwords — if the
+    // database ever leaks, a stored hash can't be used to reset anyone's
+    // account, but the plain token in transit/email can).
+    const plainToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(plainToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetTokenHash: tokenHash,
+        passwordResetExpiresAt: expiresAt,
+      },
+    });
+
+    const resetLink = `stayconnect://reset-password?token=${plainToken}`;
+    await this.notificationService.sendPasswordResetEmail(user.email, resetLink);
+
+    this.logger.log(`Password reset requested for: ${email}`);
+
+    return genericResponse;
   }
 
   async resetPassword(resetPasswordDto: ResetPasswordDto): Promise<{ message: string }> {
     const { token, newPassword } = resetPasswordDto;
 
-    // TODO: Verify reset token and update password
-    throw new BadRequestException('Password reset functionality not yet implemented');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+    const user = await this.prisma.user.findFirst({
+      where: { passwordResetTokenHash: tokenHash },
+    });
+
+    if (!user || !user.passwordResetExpiresAt || user.passwordResetExpiresAt < new Date()) {
+      throw new BadRequestException('This reset link is invalid or has expired. Please request a new one.');
+    }
+
+    const passwordValidation = PasswordUtil.validatePasswordStrength(newPassword);
+    if (!passwordValidation.isValid) {
+      throw new BadRequestException({
+        message: 'Password is too weak',
+        details: passwordValidation.errors,
+      });
+    }
+
+    const hashedPassword = await PasswordUtil.hash(newPassword);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashedPassword,
+        // Single-use — clear it so the same link can't be replayed.
+        passwordResetTokenHash: null,
+        passwordResetExpiresAt: null,
+      },
+    });
+
+    this.logger.log(`Password reset completed for: ${user.email}`);
+
+    return { message: 'Password has been reset successfully. You can now log in with your new password.' };
   }
 
   async logout(userId: string): Promise<{ message: string }> {

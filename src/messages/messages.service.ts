@@ -4,12 +4,19 @@ import { CreateConversationDto } from './dto/create-conversation.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { ConversationResponseDto, ConversationsResponseDto } from './dto/conversation-response.dto';
 import { MessageResponseDto, MessagesResponseDto } from './dto/message-response.dto';
+import { MessagesGateway } from './messages.gateway';
+import { PushNotificationService } from '../common/services/push-notification.service';
+import { redactContactInfo } from './utils/contact-redaction.util';
 
 @Injectable()
 export class MessagesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly gateway: MessagesGateway,
+    private readonly pushNotificationService: PushNotificationService,
+  ) {}
 
-  // Get all conversations for a user (as guest or host)
+  // Get all conversations for a user (as visitor or host)
   async getUserConversations(
     userId: string,
     page: number = 1,
@@ -20,7 +27,7 @@ export class MessagesService {
     const [conversations, total] = await Promise.all([
       this.prisma.conversation.findMany({
         where: {
-          OR: [{ guestId: userId }, { hostId: userId }],
+          OR: [{ visitorId: userId }, { hostId: userId }],
         },
         include: {
           property: {
@@ -30,7 +37,7 @@ export class MessagesService {
               images: true,
             },
           },
-          guest: {
+          visitor: {
             select: {
               id: true,
               firstName: true,
@@ -55,10 +62,31 @@ export class MessagesService {
       }),
       this.prisma.conversation.count({
         where: {
-          OR: [{ guestId: userId }, { hostId: userId }],
+          OR: [{ visitorId: userId }, { hostId: userId }],
         },
       }),
     ]);
+
+    const conversationIds = conversations.map((c) => c.id);
+
+    // One grouped query for all conversations on this page, rather than a
+    // per-conversation count query — keeps this from scaling linearly with
+    // page size.
+    const unreadGroups = conversationIds.length
+      ? await this.prisma.message.groupBy({
+          by: ['conversationId'],
+          where: {
+            conversationId: { in: conversationIds },
+            senderId: { not: userId },
+            isRead: false,
+          },
+          _count: { _all: true },
+        })
+      : [];
+
+    const unreadByConversation = new Map(
+      unreadGroups.map((g) => [g.conversationId, g._count._all]),
+    );
 
     const conversationDtos: ConversationResponseDto[] = conversations.map((conv) => {
       const lastMessage = conv.messages[0];
@@ -67,13 +95,13 @@ export class MessagesService {
         propertyId: conv.propertyId,
         propertyTitle: conv.property.title,
         propertyImage: conv.property.images?.[0] || null,
-        guestId: conv.guestId,
-        guestName: `${conv.guest.firstName} ${conv.guest.lastName}`,
+        visitorId: conv.visitorId,
+        visitorName: `${conv.visitor.firstName} ${conv.visitor.lastName}`,
         hostId: conv.hostId,
         hostName: `${conv.host.firstName} ${conv.host.lastName}`,
         lastMessage: lastMessage?.content || null,
         lastMessageAt: lastMessage?.createdAt || null,
-        unreadCount: 0, // TODO: Calculate unread messages
+        unreadCount: unreadByConversation.get(conv.id) || 0,
         createdAt: conv.createdAt,
         updatedAt: conv.updatedAt,
       };
@@ -101,7 +129,7 @@ export class MessagesService {
     const conversation = await this.prisma.conversation.findFirst({
       where: {
         id: conversationId,
-        OR: [{ guestId: userId }, { hostId: userId }],
+        OR: [{ visitorId: userId }, { hostId: userId }],
       },
     });
 
@@ -156,15 +184,15 @@ export class MessagesService {
 
   // Create a new conversation
   async createConversation(
-    guestId: string,
+    visitorId: string,
     dto: CreateConversationDto,
   ): Promise<ConversationResponseDto> {
     // Check if conversation already exists
     const existing = await this.prisma.conversation.findUnique({
       where: {
-        propertyId_guestId_hostId: {
+        propertyId_visitorId_hostId: {
           propertyId: dto.propertyId,
-          guestId,
+          visitorId,
           hostId: dto.hostId,
         },
       },
@@ -190,12 +218,12 @@ export class MessagesService {
     const conversation = await this.prisma.conversation.create({
       data: {
         propertyId: dto.propertyId,
-        guestId,
+        visitorId,
         hostId: dto.hostId,
         messages: dto.initialMessage
           ? {
               create: {
-                senderId: guestId,
+                senderId: visitorId,
                 content: dto.initialMessage,
               },
             }
@@ -209,7 +237,7 @@ export class MessagesService {
             images: true,
           },
         },
-        guest: {
+        visitor: {
           select: {
             id: true,
             firstName: true,
@@ -232,13 +260,13 @@ export class MessagesService {
 
     const lastMessage = conversation.messages[0];
 
-    return {
+    const conversationDto: ConversationResponseDto = {
       id: conversation.id,
       propertyId: conversation.propertyId,
       propertyTitle: conversation.property.title,
       propertyImage: conversation.property.images?.[0] || null,
-      guestId: conversation.guestId,
-      guestName: `${conversation.guest.firstName} ${conversation.guest.lastName}`,
+      visitorId: conversation.visitorId,
+      visitorName: `${conversation.visitor.firstName} ${conversation.visitor.lastName}`,
       hostId: conversation.hostId,
       hostName: `${conversation.host.firstName} ${conversation.host.lastName}`,
       lastMessage: lastMessage?.content || null,
@@ -247,6 +275,11 @@ export class MessagesService {
       createdAt: conversation.createdAt,
       updatedAt: conversation.updatedAt,
     };
+
+    // Let the host's conversation list pick up the new thread live.
+    this.gateway.emitConversationUpdate([conversation.hostId], conversationDto);
+
+    return conversationDto;
   }
 
   // Send a message
@@ -258,7 +291,11 @@ export class MessagesService {
     const conversation = await this.prisma.conversation.findFirst({
       where: {
         id: dto.conversationId,
-        OR: [{ guestId: senderId }, { hostId: senderId }],
+        OR: [{ visitorId: senderId }, { hostId: senderId }],
+      },
+      include: {
+        visitor: { select: { firstName: true, lastName: true } },
+        host: { select: { firstName: true, lastName: true } },
       },
     });
 
@@ -266,13 +303,19 @@ export class MessagesService {
       throw new NotFoundException('Conversation not found');
     }
 
+    // Strip contact info before it ever reaches the database — visitors and
+    // hosts shouldn't be able to exchange a phone number/email to arrange a
+    // booking off-platform before payment.
+    const { content, wasRedacted } = redactContactInfo(dto.content);
+
     // Create message and update conversation timestamp
     const [message] = await this.prisma.$transaction([
       this.prisma.message.create({
         data: {
           conversationId: dto.conversationId,
           senderId,
-          content: dto.content,
+          content,
+          containsRedactedContact: wasRedacted,
         },
       }),
       this.prisma.conversation.update({
@@ -281,7 +324,7 @@ export class MessagesService {
       }),
     ]);
 
-    return {
+    const messageDto: MessageResponseDto = {
       id: message.id,
       conversationId: message.conversationId,
       senderId: message.senderId,
@@ -290,11 +333,39 @@ export class MessagesService {
       readAt: message.readAt,
       createdAt: message.createdAt,
     };
+
+    // Push to anyone with this conversation open right now, and update
+    // both participants' conversation lists (last message preview).
+    this.gateway.emitNewMessage(dto.conversationId, messageDto);
+    this.gateway.emitConversationUpdate(
+      [conversation.visitorId, conversation.hostId],
+      {
+        conversationId: dto.conversationId,
+        lastMessage: messageDto.content,
+        lastMessageAt: messageDto.createdAt,
+      },
+    );
+
+    // Also send a device push notification to the recipient — the socket
+    // events above only reach someone with the app open right now.
+    const isSenderGuest = senderId === conversation.visitorId;
+    const recipientId = isSenderGuest ? conversation.hostId : conversation.visitorId;
+    const senderName = isSenderGuest
+      ? `${conversation.visitor.firstName} ${conversation.visitor.lastName}`
+      : `${conversation.host.firstName} ${conversation.host.lastName}`;
+
+    void this.pushNotificationService.sendToUser(recipientId, {
+      title: `New message from ${senderName}`,
+      body: dto.content.length > 100 ? `${dto.content.slice(0, 100)}...` : dto.content,
+      data: { type: 'message', conversationId: dto.conversationId },
+    });
+
+    return messageDto;
   }
 
   // Get or create conversation (for starting a chat from property)
   async getOrCreateConversation(
-    guestId: string,
+    visitorId: string,
     propertyId: string,
     hostId: string,
     initialMessage?: string,
@@ -302,9 +373,9 @@ export class MessagesService {
     // Try to find existing conversation
     const existing = await this.prisma.conversation.findUnique({
       where: {
-        propertyId_guestId_hostId: {
+        propertyId_visitorId_hostId: {
           propertyId,
-          guestId,
+          visitorId,
           hostId,
         },
       },
@@ -316,7 +387,7 @@ export class MessagesService {
             images: true,
           },
         },
-        guest: {
+        visitor: {
           select: {
             id: true,
             firstName: true,
@@ -344,8 +415,8 @@ export class MessagesService {
         propertyId: existing.propertyId,
         propertyTitle: existing.property.title,
         propertyImage: existing.property.images?.[0] || null,
-        guestId: existing.guestId,
-        guestName: `${existing.guest.firstName} ${existing.guest.lastName}`,
+        visitorId: existing.visitorId,
+        visitorName: `${existing.visitor.firstName} ${existing.visitor.lastName}`,
         hostId: existing.hostId,
         hostName: `${existing.host.firstName} ${existing.host.lastName}`,
         lastMessage: lastMessage?.content || null,
@@ -357,6 +428,6 @@ export class MessagesService {
     }
 
     // Create new conversation
-    return this.createConversation(guestId, { propertyId, hostId, initialMessage });
+    return this.createConversation(visitorId, { propertyId, hostId, initialMessage });
   }
 }

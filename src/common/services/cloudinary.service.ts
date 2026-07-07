@@ -16,12 +16,14 @@ export class CloudinaryService {
 
   async uploadImage(base64Image: string, folder: string = 'stayconnect/properties'): Promise<string> {
     try {
-      // Ensure base64 image has proper prefix
       const imageData = base64Image.startsWith('data:')
         ? base64Image
         : `data:image/jpeg;base64,${base64Image}`;
 
-      const result = await cloudinary.uploader.upload(imageData, {
+      // Wrap in a 25-second timeout — Render free tier closes idle
+      // connections at 30s, so we need to fail fast and let the frontend
+      // show a useful error rather than hanging indefinitely.
+      const uploadPromise = cloudinary.uploader.upload(imageData, {
         folder,
         resource_type: 'image',
         transformation: [
@@ -31,11 +33,17 @@ export class CloudinaryService {
         ],
       });
 
-      this.logger.log(`Image uploaded to Cloudinary: ${result.secure_url}`);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Upload timed out after 25 seconds')), 25000)
+      );
+
+      const result = await Promise.race([uploadPromise, timeoutPromise]) as Awaited<typeof uploadPromise>;
+
+      this.logger.log(`Image uploaded: ${result.secure_url}`);
       return result.secure_url;
     } catch (error) {
       this.logger.error('Cloudinary upload failed:', error);
-      throw new Error('Failed to upload image to cloud storage');
+      throw new Error(`Failed to upload image: ${(error as Error).message}`);
     }
   }
 

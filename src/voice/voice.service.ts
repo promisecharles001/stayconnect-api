@@ -1,10 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AccessToken, RoomServiceClient, CreateOptions } from 'livekit-server-sdk';
-import { v4 as uuidv4 } from 'uuid';
+import { PrismaService } from '../prisma/prisma.service';
 
 export interface TokenGenerationParams {
-  roomName: string;
+  bookingId: string;
   participantName?: string;
 }
 
@@ -24,7 +24,10 @@ export class VoiceService {
   private readonly tokenExpiration: number;
   private roomServiceClient: RoomServiceClient | null = null;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {
     this.apiKey = this.configService.get<string>('LIVEKIT_API_KEY') || '';
     this.apiSecret = this.configService.get<string>('LIVEKIT_API_SECRET') || '';
     this.serverUrl = this.configService.get<string>('LIVEKIT_SERVER_URL')
@@ -51,39 +54,59 @@ export class VoiceService {
   }
 
   /**
-   * Generate a LiveKit access token for voice calling
-   * @param params - Token generation parameters
-   * @param userId - Authenticated user ID
-   * @returns Generated token with metadata
+   * Generate a LiveKit access token for a booking voice call.
+   * The caller must be the visitor or host of the booking, and payment must
+   * be verified — enforcing that contact only happens after the platform
+   * has confirmed money was received.
    */
-  async generateToken(params: TokenGenerationParams, userId: number): Promise<GeneratedToken> {
-    const { roomName, participantName } = params;
+  async generateToken(params: TokenGenerationParams, userId: string): Promise<GeneratedToken> {
+    const { bookingId, participantName } = params;
 
-    // Validate configuration
     if (!this.apiKey || !this.apiSecret || !this.serverUrl) {
       throw new Error('LiveKit credentials are not configured');
     }
 
-    // Validate room name format (security)
-    if (!this.isValidRoomName(roomName)) {
-      throw new Error('Invalid room name format');
+    // Load the booking and verify the caller is a participant
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: {
+        visitor: { select: { firstName: true, lastName: true } },
+        host: { select: { firstName: true, lastName: true } },
+        property: { select: { title: true } },
+      },
+    });
+
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
     }
 
-    // Create a secure room name with user context
-    const secureRoomName = `${roomName}-${userId}-${uuidv4().substring(0, 8)}`;
-    
-    // Create participant identity
-    const identity = participantName || `user-${userId}-${Date.now()}`;
+    const isParticipant = booking.visitorId === userId || booking.hostId === userId;
+    if (!isParticipant) {
+      throw new ForbiddenException('You are not a participant in this booking');
+    }
 
-    // Create the access token
+    // Gate: voice calls are only allowed after payment is verified
+    if (!booking.paymentVerified) {
+      throw new ForbiddenException(
+        'Voice calls are unlocked after payment is verified. ' +
+        'Upload your payment receipt and wait for admin confirmation.',
+      );
+    }
+
+    // Both visitor and host get a token for the SAME deterministic room
+    const roomName = `booking-${bookingId}`;
+
+    const isVisitor = booking.visitorId === userId;
+    const person = isVisitor ? booking.visitor : booking.host;
+    const identity = participantName || `${person.firstName} ${person.lastName}`;
+
     const accessToken = new AccessToken(this.apiKey, this.apiSecret, {
       identity,
       ttl: this.tokenExpiration,
     });
 
-    // Grant permissions to the room
     accessToken.addGrant({
-      room: secureRoomName,
+      room: roomName,
       roomJoin: true,
       roomAdmin: false,
       canPublish: true,
@@ -91,14 +114,15 @@ export class VoiceService {
       canPublishData: true,
     });
 
-    // Generate the JWT token
     const token = await accessToken.toJwt();
 
-    this.logger.log(`Generated LiveKit token for user: ${userId}, room: ${secureRoomName}, identity: ${identity}`);
+    this.logger.log(
+      `LiveKit token issued — booking: ${bookingId}, user: ${userId} (${isVisitor ? 'visitor' : 'host'}), room: ${roomName}`,
+    );
 
     return {
       token,
-      roomName: secureRoomName,
+      roomName,
       serverUrl: this.serverUrl,
       expiresIn: this.tokenExpiration,
     };
@@ -132,16 +156,6 @@ export class VoiceService {
 
     await this.roomServiceClient.deleteRoom(roomName);
     this.logger.log(`Deleted LiveKit room: ${roomName}`);
-  }
-
-  /**
-   * Validate room name format
-   */
-  private isValidRoomName(roomName: string): boolean {
-    // Room name should be alphanumeric with hyphens/underscores only
-    // Length between 1 and 64 characters
-    const roomNameRegex = /^[a-zA-Z0-9_-]{1,64}$/;
-    return roomNameRegex.test(roomName);
   }
 
   /**

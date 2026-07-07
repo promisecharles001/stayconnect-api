@@ -8,7 +8,7 @@ export class BookingEarningDto {
   propertyTitle: string;
 
   @ApiProperty()
-  guestName: string;
+  visitorName: string;
 
   @ApiProperty()
   amount: number;

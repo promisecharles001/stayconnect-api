@@ -1,11 +1,15 @@
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { Logger } from '@nestjs/common';
 import * as compression from 'compression';
 import * as helmet from 'helmet';
 import * as cookieParser from 'cookie-parser';
+import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
+
+const logger = new Logger('Bootstrap');
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -15,6 +19,15 @@ async function bootstrap() {
   app.use(helmet.default());
   app.use(compression.default());
   app.use(cookieParser.default());
+
+  // Raise the default body size limit (Express defaults to ~100kb, which is
+  // too small for the base64-encoded image payloads sent to /upload/images
+  // and /kyc — those routes accept JSON bodies containing one or more
+  // base64 photos rather than multipart uploads). 15mb gives headroom for a
+  // few photos per request; tighten this if you move uploads to direct
+  // client-to-Cloudinary signed uploads instead.
+  app.use(json({ limit: '15mb' }));
+  app.use(urlencoded({ extended: true, limit: '15mb' }));
 
   // CORS configuration
   const corsOptions = configService.get('cors');
@@ -26,9 +39,7 @@ async function bootstrap() {
   const globalPrefix = `${apiPrefix}/${apiVersion}`;
   app.setGlobalPrefix(globalPrefix);
   
-  console.log('PREFIX:', globalPrefix);
-  console.log('API_PREFIX from env:', process.env.API_PREFIX);
-  console.log('API_VERSION from env:', process.env.API_VERSION);
+  logger.log(`API prefix: ${globalPrefix}`);
 
   // Port configuration
   const port = configService.get<number>('app.port') || 3000;
@@ -71,18 +82,8 @@ async function bootstrap() {
 
   await app.listen(port, '0.0.0.0');
 
-  console.log(`
-  ╔════════════════════════════════════════════════════════════╗
-  ║                                                            ║
-  ║           🏠 StayConnect NG Backend Server                 ║
-  ║                                                            ║
-  ╠════════════════════════════════════════════════════════════╣
-  ║  📡 Server running on: http://localhost:${port}              ║
-  ║  📚 API Documentation: http://localhost:${port}/${apiPrefix}/${apiVersion}/docs ║
-  ║  🔑 API Prefix: /${apiPrefix}/${apiVersion}                        ║
-  ║                                                            ║
-  ╚════════════════════════════════════════════════════════════╝
-  `);
+  logger.log(`Server running on port ${port}`);
+  logger.log(`API docs available at /${apiPrefix}/${apiVersion}/docs`);
 }
 
 bootstrap();

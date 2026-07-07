@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsString, IsBoolean, IsUrl } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsBoolean, IsUrl, IsNumber, Min } from 'class-validator';
 import { BookingStatus } from '@prisma/client';
 
 export class UpdateBookingDto {
@@ -18,4 +18,19 @@ export class VerifyPaymentDto {
   @ApiProperty({ example: true })
   @IsBoolean()
   verified: boolean;
+}
+
+export class RefundBookingDto {
+  @ApiProperty({
+    example: 5000,
+    description: 'Inspection/platform fee kept from the total amount before refunding the rest to the visitor.',
+  })
+  @IsNumber()
+  @Min(0)
+  feeAmount: number;
+
+  @ApiProperty({ example: 'Visitor inspected the apartment and it did not match the listing.', required: false })
+  @IsOptional()
+  @IsString()
+  reason?: string;
 }

@@ -41,8 +41,6 @@ lerna-debug.log*
 .env.production
 .env.*.local
 
-# Prisma
-prisma/migrations/*/migration.sql
 
 # Uploads
 /uploads

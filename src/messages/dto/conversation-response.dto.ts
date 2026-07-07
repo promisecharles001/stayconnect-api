@@ -14,10 +14,10 @@ export class ConversationResponseDto {
   propertyImage: string | null;
 
   @ApiProperty()
-  guestId: string;
+  visitorId: string;
 
   @ApiProperty()
-  guestName: string;
+  visitorName: string;
 
   @ApiProperty()
   hostId: string;

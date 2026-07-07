@@ -14,6 +14,7 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryUsersDto } from './dto/query-users.dto';
@@ -26,6 +27,16 @@ import { UserStatus } from '@prisma/client';
 @ApiBearerAuth()
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
+
+  @Patch('me/push-token')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Save the current user\'s Expo push token for this device' })
+  async updateMyPushToken(
+    @CurrentUser('id') userId: string,
+    @Body('pushToken') pushToken: string,
+  ): Promise<void> {
+    await this.usersService.updatePushToken(userId, pushToken);
+  }
 
   @Post()
   @Roles('ADMIN')

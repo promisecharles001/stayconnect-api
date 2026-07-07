@@ -196,6 +196,17 @@ export class UsersService {
     return user as unknown as UserResponseDto;
   }
 
+  // Save (or clear, by passing null) this user's Expo push token. Called
+  // after the app registers for push notifications, and whenever the
+  // token changes (Expo can rotate it). No-ops are cheap, so callers don't
+  // need to dedupe — just call this whenever a token is obtained.
+  async updatePushToken(id: string, pushToken: string | null): Promise<void> {
+    await this.prisma.user.update({
+      where: { id },
+      data: { pushToken },
+    });
+  }
+
   async updateRole(id: string, roleId: string): Promise<UserResponseDto> {
     // Check if role exists
     const role = await this.prisma.role.findUnique({

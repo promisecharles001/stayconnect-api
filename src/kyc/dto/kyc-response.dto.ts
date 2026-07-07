@@ -64,4 +64,15 @@ export class KycResponseDto {
 
   @ApiProperty({ example: '2024-01-01T00:00:00.000Z' })
   updatedAt: Date;
+
+  @ApiProperty({
+    description: 'Submitter contact info — included on admin list/detail views',
+    required: false,
+  })
+  user?: {
+    email: string;
+    firstName: string;
+    lastName: string;
+    phone: string | null;
+  };
 }

@@ -29,17 +29,22 @@ model User {
   hostBio            String?
   hostRating         Float?              @default(0)
   hostReviewCount    Int?                @default(0)
-  guestRating        Float?              @default(0)
-  guestReviewCount   Int?                @default(0)
-  bookings           Booking[]           @relation("GuestBookings")
+  visitorRating      Float?              @default(0)
+  visitorReviewCount Int?                @default(0)
+  pushToken          String?
+  passwordResetTokenHash String?
+  passwordResetExpiresAt DateTime?
+  bookings           Booking[]           @relation("VisitorBookings")
   hostBookings       Booking[]           @relation("HostBookings")
   earnings           EarningsLedger[]
   kycVerification    KYCVerification?
   properties         Property[]
   role               Role                @relation(fields: [roleId], references: [id])
   withdrawalRequests WithdrawalRequest[]
-  guestConversations Conversation[]      @relation("GuestConversations")
+  visitorConversations Conversation[]      @relation("VisitorConversations")
   hostConversations  Conversation[]      @relation("HostConversations")
+  reviewsGiven       Review[]            @relation("VisitorReviews")
+  reviewsReceived    Review[]            @relation("HostReviews")
 
   @@index([email])
   @@index([roleId])
@@ -129,6 +134,7 @@ model Property {
   publishedAt       DateTime?
   bookings          Booking[]
   conversations     Conversation[]
+  reviews           Review[]
   host              User           @relation(fields: [hostId], references: [id], onDelete: Cascade)
 
   @@index([hostId])
@@ -142,7 +148,7 @@ model Property {
 
 model Booking {
   id               String        @id @default(uuid())
-  guestId          String
+  visitorId        String
   hostId           String
   propertyId       String
   startDate        DateTime
@@ -154,18 +160,37 @@ model Booking {
   paymentVerified  Boolean       @default(false)
   verifiedAt       DateTime?
   verifiedBy       String?
+  // Escrow: payment is verified (held by admin) before funds are released to
+  // the host or refunded to the visitor. Visitor contact with the host stays
+  // hidden until escrowStatus reaches HELD (see bookings.service.ts).
+  escrowStatus     EscrowStatus  @default(PENDING)
+  fundsReleasedAt  DateTime?
+  fundsReleasedBy  String?
+  refundedAt       DateTime?
+  refundedBy       String?
+  refundAmount     Decimal?      @db.Decimal(10, 2)
+  refundReason     String?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
-  guest            User          @relation("GuestBookings", fields: [guestId], references: [id])
+  visitor          User          @relation("VisitorBookings", fields: [visitorId], references: [id])
   host             User          @relation("HostBookings", fields: [hostId], references: [id])
   property         Property      @relation(fields: [propertyId], references: [id])
+  review           Review?
 
-  @@index([guestId])
+  @@index([visitorId])
   @@index([hostId])
   @@index([propertyId])
   @@index([status])
   @@index([createdAt])
+  @@index([escrowStatus])
   @@map("bookings")
+}
+
+enum EscrowStatus {
+  PENDING
+  HELD
+  RELEASED
+  REFUNDED
 }
 
 model EarningsLedger {
@@ -240,7 +265,7 @@ enum PropertyType {
   STUDIO
   HOTEL
   RESORT
-  GUEST_HOUSE
+  VISITOR_HOUSE
   HOSTEL
   OTHER
 }
@@ -272,35 +297,62 @@ enum WithdrawalStatus {
 model Conversation {
   id          String    @id @default(uuid())
   propertyId  String
-  guestId     String
+  visitorId   String
   hostId      String
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   property    Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  guest       User      @relation("GuestConversations", fields: [guestId], references: [id], onDelete: Cascade)
+  visitor     User      @relation("VisitorConversations", fields: [visitorId], references: [id], onDelete: Cascade)
   host        User      @relation("HostConversations", fields: [hostId], references: [id], onDelete: Cascade)
   messages    Message[]
 
   @@index([propertyId])
-  @@index([guestId])
+  @@index([visitorId])
   @@index([hostId])
   @@index([updatedAt])
-  @@unique([propertyId, guestId, hostId])
+  @@unique([propertyId, visitorId, hostId])
   @@map("conversations")
 }
 
 model Message {
-  id              String       @id @default(uuid())
-  conversationId  String
-  senderId        String
-  content         String
-  isRead          Boolean      @default(false)
-  readAt          DateTime?
-  createdAt       DateTime     @default(now())
-  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  id                       String       @id @default(uuid())
+  conversationId           String
+  senderId                 String
+  content                  String
+  isRead                   Boolean      @default(false)
+  readAt                   DateTime?
+  // True if this message had contact info (phone/email/social handle)
+  // stripped out before saving — lets admins audit repeat offenders.
+  containsRedactedContact  Boolean      @default(false)
+  createdAt                DateTime     @default(now())
+  conversation             Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId])
   @@index([senderId])
   @@index([createdAt])
   @@map("messages")
+}
+
+model Review {
+  id              String    @id @default(uuid())
+  bookingId       String    @unique
+  propertyId      String
+  visitorId         String
+  hostId          String
+  rating          Int
+  comment         String?
+  hostResponse    String?
+  hostRespondedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  booking         Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  property        Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  visitor           User      @relation("VisitorReviews", fields: [visitorId], references: [id], onDelete: Cascade)
+  host            User      @relation("HostReviews", fields: [hostId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+  @@index([visitorId])
+  @@index([hostId])
+  @@index([createdAt])
+  @@map("reviews")
 }

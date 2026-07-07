@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WithdrawalStatus } from '@prisma/client';
 import { EarningsService } from '../earnings/earnings.service';
 import { PaginationUtil, PaginatedResult } from '../common/utils/pagination.util';
+import { PushNotificationService } from '../common/services/push-notification.service';
 import { CreateWithdrawalDto } from './dto/create-withdrawal.dto';
 import { WithdrawalResponseDto } from './dto/withdrawal-response.dto';
 import Decimal from 'decimal.js';
@@ -20,6 +21,7 @@ export class WithdrawalsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly earningsService: EarningsService,
+    private readonly pushNotificationService: PushNotificationService,
   ) {}
 
   async create(
@@ -200,7 +202,6 @@ export class WithdrawalsService {
 
     if (status === WithdrawalStatus.FAILED) {
       updateData.failureReason = failureReason;
-      // TODO: Refund the amount back to host's earnings
     }
 
     const updatedWithdrawal = await this.prisma.withdrawalRequest.update({
@@ -208,7 +209,33 @@ export class WithdrawalsService {
       data: updateData,
     });
 
+    if (status === WithdrawalStatus.FAILED) {
+      await this.earningsService.refundWithdrawal(withdrawal.hostId, Number(withdrawal.amount), id);
+    }
+
     this.logger.log(`Withdrawal ${id} processed with status: ${status}`);
+
+    const formattedAmount = new Intl.NumberFormat('en-NG', {
+      style: 'currency',
+      currency: 'NGN',
+      minimumFractionDigits: 0,
+    }).format(Number(withdrawal.amount));
+
+    if (status === WithdrawalStatus.COMPLETED) {
+      void this.pushNotificationService.sendToUser(withdrawal.hostId, {
+        title: 'Withdrawal Completed',
+        body: `Your withdrawal of ${formattedAmount} has been sent to your bank account.`,
+        data: { type: 'withdrawal', withdrawalId: id },
+      });
+    } else if (status === WithdrawalStatus.FAILED) {
+      void this.pushNotificationService.sendToUser(withdrawal.hostId, {
+        title: 'Withdrawal Failed',
+        body: failureReason
+          ? `Your withdrawal of ${formattedAmount} failed: ${failureReason}`
+          : `Your withdrawal of ${formattedAmount} could not be processed.`,
+        data: { type: 'withdrawal', withdrawalId: id },
+      });
+    }
 
     // Convert Decimal values to numbers for the response
     return {
@@ -241,7 +268,7 @@ export class WithdrawalsService {
       },
     });
 
-    // TODO: Refund the amount back to host's earnings
+    await this.earningsService.refundWithdrawal(hostId, Number(withdrawal.amount), id);
 
     this.logger.log(`Withdrawal ${id} cancelled by host`);
 

@@ -3,16 +3,16 @@ import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 
 export class GenerateTokenDto {
   @ApiProperty({
-    example: 'booking-call-12345',
-    description: 'Unique room name for the voice call',
+    example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+    description: 'Booking ID — caller must be the visitor or host of this booking, and payment must be verified',
   })
   @IsString()
-  @IsNotEmpty({ message: 'Room name is required' })
-  roomName: string;
+  @IsNotEmpty({ message: 'Booking ID is required' })
+  bookingId: string;
 
   @ApiProperty({
     example: 'user-john-doe',
-    description: 'Participant name/identity for the LiveKit session',
+    description: 'Participant display name shown in the call',
   })
   @IsString()
   @IsOptional()

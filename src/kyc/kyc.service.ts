@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { KYCStatus, UserStatus } from '@prisma/client';
 import { NotificationService } from '../common/services/notification.service';
+import { PushNotificationService } from '../common/services/push-notification.service';
 import { CreateKycDto } from './dto/create-kyc.dto';
 import { ReviewKycDto } from './dto/review-kyc.dto';
 import { KycResponseDto } from './dto/kyc-response.dto';
@@ -21,6 +22,7 @@ export class KycService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly notificationService: NotificationService,
+    private readonly pushNotificationService: PushNotificationService,
   ) {}
 
   async submitKyc(userId: string, createKycDto: CreateKycDto): Promise<KycResponseDto> {
@@ -102,13 +104,18 @@ export class KycService {
   async findById(id: string): Promise<KycResponseDto> {
     const kyc = await this.prisma.kYCVerification.findUnique({
       where: { id },
+      include: {
+        user: {
+          select: { email: true, firstName: true, lastName: true, phone: true },
+        },
+      },
     });
 
     if (!kyc) {
       throw new NotFoundException('KYC verification not found');
     }
 
-    return kyc as KycResponseDto;
+    return kyc as unknown as KycResponseDto;
   }
 
   async findAll(options: {
@@ -136,6 +143,7 @@ export class KycService {
               email: true,
               firstName: true,
               lastName: true,
+              phone: true,
             },
           },
         },
@@ -187,6 +195,17 @@ export class KycService {
     }
 
     this.logger.log(`KYC ${status} for user: ${kyc.user.email}`);
+
+    void this.pushNotificationService.sendToUser(kyc.userId, {
+      title: status === KYCStatus.APPROVED ? 'Verification Approved!' : 'Verification Update',
+      body:
+        status === KYCStatus.APPROVED
+          ? "You're verified! You can now list properties on StayConnect."
+          : rejectionReason
+            ? `Your verification needs attention: ${rejectionReason}`
+            : 'Your verification needs attention. Check the app for details.',
+      data: { type: 'kyc', status },
+    });
 
     return updatedKyc as KycResponseDto;
   }
