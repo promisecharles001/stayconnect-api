@@ -14,7 +14,7 @@ const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 // prices, or short room/measurement numbers.
 const PHONE_CANDIDATE_REGEX = /\+?\d[\d\s\-().]{6,15}\d/g;
 
-const SOCIAL_KEYWORDS = /(whatsapp|whats app|telegram|instagram|\bIG\b|snapchat|snap chat)/i;
+const SOCIAL_KEYWORDS = /(whatsapp|whats app|telegram|instagram|\bIG\b|snapchat|snap chat)/gi;
 
 function digitsOnly(value: string): string {
   return value.replace(/\D/g, '');
