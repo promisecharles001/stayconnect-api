@@ -76,4 +76,7 @@ export class EarningsSummaryDto {
 
   @ApiProperty()
   lastMonthEarnings: number;
+
+  @ApiProperty()
+  totalBookings: number;
 }

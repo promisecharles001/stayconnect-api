@@ -96,6 +96,8 @@ export class EarningsService {
       )
       .reduce((sum, entry) => sum + Number(entry.amount), 0);
 
+    const totalBookings = await this.prisma.booking.count({ where: { hostId } });
+
     return {
       totalEarnings,
       availableBalance,
@@ -103,6 +105,7 @@ export class EarningsService {
       totalWithdrawn,
       thisMonthEarnings,
       lastMonthEarnings,
+      totalBookings,
     };
   }
 
