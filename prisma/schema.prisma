@@ -45,6 +45,7 @@ model User {
   hostConversations  Conversation[]      @relation("HostConversations")
   reviewsGiven       Review[]            @relation("VisitorReviews")
   reviewsReceived    Review[]            @relation("HostReviews")
+  wishlist           WishlistItem[]
 
   @@index([email])
   @@index([roleId])
@@ -135,6 +136,7 @@ model Property {
   bookings          Booking[]
   conversations     Conversation[]
   reviews           Review[]
+  wishlistedBy      WishlistItem[]
   host              User           @relation(fields: [hostId], references: [id], onDelete: Cascade)
 
   @@index([hostId])
@@ -255,6 +257,21 @@ enum KYCDocumentType {
   DRIVERS_LICENSE
   INTERNATIONAL_PASSPORT
   VOTERS_CARD
+}
+
+model WishlistItem {
+  id         String   @id @default(uuid())
+  userId     String
+  propertyId String
+  createdAt  DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, propertyId])
+  @@index([userId])
+  @@index([propertyId])
+  @@map("wishlist_items")
 }
 
 enum PropertyType {

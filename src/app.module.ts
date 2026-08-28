@@ -23,6 +23,7 @@ import { AdminModule } from './admin/admin.module';
 import { VoiceModule } from './voice/voice.module';
 import { MessagesModule } from './messages/messages.module';
 import { ReviewsModule } from './reviews/reviews.module';
+import { WishlistModule } from './wishlist/wishlist.module';
 
 // Guards & Filters
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -60,6 +61,7 @@ import { createValidationPipe } from './common/pipes/validation.pipe';
     VoiceModule,
     MessagesModule,
     ReviewsModule,
+    WishlistModule,
   ],
   providers: [
     // Global JWT Guard (with @Public() decorator support)
