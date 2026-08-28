@@ -17,6 +17,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto, VerifyPaymentDto, RefundBookingDto } from './dto/update-booking.dto';
+import { SubmitPaymentProofDto } from './dto/submit-payment-proof.dto';
 import { BookingResponseDto } from './dto/booking-response.dto';
 import { ApiPaginatedResponse } from '../common/decorators/api-paginated-response.decorator';
 
@@ -101,6 +102,17 @@ export class BookingsController {
     @Body() updateBookingDto: UpdateBookingDto,
   ): Promise<BookingResponseDto> {
     return this.bookingsService.updateStatus(id, userId, updateBookingDto);
+  }
+
+  @Patch(':id/payment-proof')
+  @ApiOperation({ summary: 'Submit proof of payment for a booking (Visitor only)' })
+  @ApiParam({ name: 'id', description: 'Booking ID', type: 'string' })
+  async submitPaymentProof(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') visitorId: string,
+    @Body() dto: SubmitPaymentProofDto,
+  ): Promise<BookingResponseDto> {
+    return this.bookingsService.submitPaymentProof(id, visitorId, dto.paymentProof);
   }
 
   @Patch(':id/verify-payment')

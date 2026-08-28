@@ -298,6 +298,51 @@ export class BookingsService {
     return baseBooking as unknown as BookingResponseDto;
   }
 
+  /**
+   * Attach proof of payment to a booking.
+   *
+   * Separate from updateStatus because that one is host-only, and it is the
+   * visitor who pays — without this the escrow chain could never start:
+   * verifyPayment refuses to run until a booking has a paymentProof.
+   */
+  async submitPaymentProof(
+    id: string,
+    visitorId: string,
+    paymentProof: string,
+  ): Promise<BookingResponseDto> {
+    const booking = await this.prisma.booking.findUnique({ where: { id } });
+
+    if (!booking) {
+      throw new NotFoundException(`Booking with ID '${id}' not found`);
+    }
+
+    if (booking.visitorId !== visitorId) {
+      throw new ForbiddenException('Only the visitor who booked can submit payment proof');
+    }
+
+    if (booking.paymentVerified) {
+      throw new BadRequestException('Payment has already been verified for this booking');
+    }
+
+    const updatedBooking = await this.prisma.booking.update({
+      where: { id },
+      data: { paymentProof },
+      include: {
+        property: {
+          select: {
+            id: true,
+            title: true,
+            images: true,
+          },
+        },
+      },
+    });
+
+    this.logger.log(`Payment proof submitted for booking ${id}`);
+
+    return updatedBooking as unknown as BookingResponseDto;
+  }
+
   async updateStatus(
     id: string,
     userId: string,
