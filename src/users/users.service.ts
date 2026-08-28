@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { USER_SAFE_SELECT } from './users.select';
 import { PasswordUtil } from '../common/utils/password.util';
 import { PaginationUtil, PaginatedResult } from '../common/utils/pagination.util';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -63,7 +64,7 @@ export class UsersService {
         password: hashedPassword,
         roleId: userRoleId,
       },
-      include: { role: true },
+      select: USER_SAFE_SELECT,
     });
 
     this.logger.log(`User created by admin: ${user.email}`);
@@ -102,7 +103,7 @@ export class UsersService {
       skip,
       take,
       orderBy: { createdAt: 'desc' },
-      include: { role: true },
+      select: USER_SAFE_SELECT,
     });
 
     return PaginationUtil.createResult(users as unknown as UserResponseDto[], total, { page, limit });
@@ -111,7 +112,7 @@ export class UsersService {
   async findOne(id: string): Promise<UserResponseDto> {
     const user = await this.prisma.user.findUnique({
       where: { id },
-      include: { role: true },
+      select: USER_SAFE_SELECT,
     });
 
     if (!user) {
@@ -124,7 +125,7 @@ export class UsersService {
   async findByEmail(email: string): Promise<UserResponseDto | null> {
     const user = await this.prisma.user.findUnique({
       where: { email },
-      include: { role: true },
+      select: USER_SAFE_SELECT,
     });
 
     return user as unknown as UserResponseDto | null;
@@ -158,7 +159,7 @@ export class UsersService {
     const user = await this.prisma.user.update({
       where: { id },
       data: updatePayload,
-      include: { role: true },
+      select: USER_SAFE_SELECT,
     });
 
     this.logger.log(`User updated: ${user.email}`);
@@ -188,7 +189,7 @@ export class UsersService {
     const user = await this.prisma.user.update({
       where: { id },
       data: { status },
-      include: { role: true },
+      select: USER_SAFE_SELECT,
     });
 
     this.logger.log(`User status updated to ${status}: ${user.email}`);
@@ -220,7 +221,7 @@ export class UsersService {
     const user = await this.prisma.user.update({
       where: { id },
       data: { roleId },
-      include: { role: true },
+      select: USER_SAFE_SELECT,
     });
 
     this.logger.log(`User role updated to ${role.name}: ${user.email}`);

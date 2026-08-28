@@ -11,6 +11,7 @@ import { JwtService } from '@nestjs/jwt';
 import { UserStatus } from '@prisma/client';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { USER_SAFE_SELECT } from '../users/users.select';
 import { PasswordUtil } from '../common/utils/password.util';
 import { NotificationService } from '../common/services/notification.service';
 import { RegisterDto } from './dto/register.dto';
@@ -93,9 +94,9 @@ export class AuthService {
         roleId: assignedRole.id,
         status: UserStatus.PENDING_VERIFICATION,
       },
-      include: {
-        role: true,
-      },
+      // Select rather than include: `include` returns every column, and this
+      // row is handed straight back to the client in the register response.
+      select: USER_SAFE_SELECT,
     });
 
     this.logger.log(`User registered successfully: ${user.email}`);
@@ -149,10 +150,17 @@ export class AuthService {
     // Generate tokens
     const tokens = await this.generateTokens(user as any, rememberMe);
 
-    const { password: _, ...userWithoutPassword } = user;
+    // Strip the credential columns — the bcrypt hash and the password-reset
+    // token hash have no business reaching a client, even its owner's.
+    const {
+      password: _password,
+      passwordResetTokenHash: _resetHash,
+      passwordResetExpiresAt: _resetExpires,
+      ...safeUser
+    } = user;
 
     return {
-      user: userWithoutPassword as unknown as UserResponseDto,
+      user: safeUser as unknown as UserResponseDto,
       tokens,
     };
   }
@@ -315,7 +323,7 @@ export class AuthService {
   async getProfile(userId: string): Promise<UserResponseDto> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: { role: true },
+      select: USER_SAFE_SELECT,
     });
 
     if (!user) {
