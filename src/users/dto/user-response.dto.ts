@@ -58,9 +58,12 @@ export class UserResponseDto {
   @ApiProperty({ example: 0 })
   hostReviewCount: number | null;
 
+  // The columns are visitorRating/visitorReviewCount and the endpoints return
+  // those names; the DTO was left on the pre-rename spelling, so Swagger
+  // advertised two fields the API has never sent.
   @ApiProperty({ example: 0 })
-  guestRating: number | null;
+  visitorRating: number | null;
 
   @ApiProperty({ example: 0 })
-  guestReviewCount: number | null;
+  visitorReviewCount: number | null;
 }
