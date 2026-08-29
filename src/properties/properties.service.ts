@@ -138,10 +138,17 @@ export class PropertiesService {
     where.status = status || PropertyStatus.APPROVED;
 
     if (search) {
+      // state and address were missing here, so the single most likely query
+      // found nothing: listings render as "Lekki, Lagos" and the search box
+      // invites a "city, area or property", but searching the state — which
+      // is how people search in Nigeria — matched no column and returned an
+      // empty result for an area that clearly has listings.
       where.OR = [
         { title: { contains: search, mode: 'insensitive' } },
         { description: { contains: search, mode: 'insensitive' } },
         { city: { contains: search, mode: 'insensitive' } },
+        { state: { contains: search, mode: 'insensitive' } },
+        { address: { contains: search, mode: 'insensitive' } },
       ];
     }
 
