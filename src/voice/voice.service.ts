@@ -33,7 +33,18 @@ export class VoiceService {
     this.serverUrl = this.configService.get<string>('LIVEKIT_SERVER_URL')
       || this.configService.get<string>('LIVEKIT_URL')
       || '';
-    this.tokenExpiration = this.configService.get<number>('LIVEKIT_TOKEN_EXPIRATION') || 3600;
+    // Env vars arrive as strings, and the <number> type argument is a claim
+    // about the value, not a conversion. Passing the raw "3600" through as
+    // AccessToken's ttl made the SDK read it as a time period ("1h", "10m")
+    // rather than seconds, so every token threw "Invalid time period format"
+    // and voice calling 500'd. Coerce it here.
+    const configuredExpiration = Number(
+      this.configService.get('LIVEKIT_TOKEN_EXPIRATION'),
+    );
+    this.tokenExpiration =
+      Number.isFinite(configuredExpiration) && configuredExpiration > 0
+        ? configuredExpiration
+        : 3600;
 
     if (!this.apiKey) {
       this.logger.warn('LIVEKIT_API_KEY is not configured. Voice calling will not work.');
