@@ -270,7 +270,7 @@ export class AuthService {
     });
 
     const resetLink = `stayconnect://reset-password?token=${plainToken}`;
-    await this.notificationService.sendPasswordResetEmail(user.email, resetLink);
+    await this.notificationService.sendPasswordResetEmail(user.email, resetLink, plainToken);
 
     this.logger.log(`Password reset requested for: ${email}`);
 

@@ -112,16 +112,29 @@ export class NotificationService {
     });
   }
 
-  async sendPasswordResetEmail(email: string, resetLink: string): Promise<void> {
+  async sendPasswordResetEmail(email: string, resetLink: string, resetToken?: string): Promise<void> {
+    // The link uses the app's custom scheme (stayconnect://). Mail clients do
+    // not turn those into clickable links the way they do http(s), and on a
+    // desktop client the scheme resolves to nothing at all — so the link on
+    // its own could leave a user with no way through. The reset screen accepts
+    // a pasted token for exactly this case, so spell the token out as the
+    // reliable path and offer the link as the shortcut.
+    const tokenBlock = resetToken
+      ? `\n\nIf tapping the link doesn't work (it won't on a computer), open the ` +
+        `StayConnect app, go to Forgot Password > "I have a reset code", and paste ` +
+        `this code:\n\n${resetToken}`
+      : '';
+
     await this.sendAdminNotification({
       type: 'PASSWORD_RESET',
       recipientEmail: email,
       subject: 'Reset your StayConnect NG password',
       message:
-        `We received a request to reset your password. Tap the link below to choose a new one ` +
-        `(this link expires in 1 hour):\n\n${resetLink}\n\n` +
-        `If you didn't request this, you can safely ignore this email — your password won't be changed.`,
-      data: { resetLink },
+        `We received a request to reset your password. Tap the link below on your phone ` +
+        `to choose a new one (it expires in 1 hour):\n\n${resetLink}` +
+        tokenBlock +
+        `\n\nIf you didn't request this, you can safely ignore this email — your password won't be changed.`,
+      data: { resetLink, resetToken },
     });
   }
 }
