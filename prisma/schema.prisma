@@ -158,6 +158,11 @@ model Property {
 
 model Booking {
   id               String        @id @default(uuid())
+  // The short code the visitor puts in their bank transfer description, and
+  // what an admin searches to match a line on the statement to a booking.
+  // Stored rather than derived so it can be queried and can never drift
+  // from whatever the visitor was shown.
+  reference        String        @unique
   visitorId        String
   hostId           String
   propertyId       String

@@ -78,11 +78,13 @@ export class BookingsController {
     @Query('page') page = 1,
     @Query('limit') limit = 10,
     @Query('escrowStatus') escrowStatus?: EscrowStatus,
+    @Query('search') search?: string,
   ) {
     return this.bookingsService.findAllAdmin({
       page: parseInt(page as any, 10),
       limit: parseInt(limit as any, 10),
       escrowStatus,
+      search,
     });
   }
 

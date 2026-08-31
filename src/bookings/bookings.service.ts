@@ -14,6 +14,7 @@ import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto, VerifyPaymentDto, RefundBookingDto } from './dto/update-booking.dto';
 import { BookingResponseDto } from './dto/booking-response.dto';
 import Decimal from 'decimal.js';
+import { randomUUID } from 'crypto';
 
 @Injectable()
 export class BookingsService {
@@ -24,6 +25,59 @@ export class BookingsService {
     private readonly pushNotificationService: PushNotificationService,
     private readonly earningsService: EarningsService,
   ) {}
+
+  /**
+   * The transfer reference for a booking id: 'BK-' plus its first 8 hex
+   * characters, uppercased. Short because it is typed into a bank narration
+   * field, and unchanged from what the client used to derive so codes
+   * already given to visitors keep resolving.
+   */
+  private static referenceFor(bookingId: string): string {
+    return `BK-${bookingId.slice(0, 8).toUpperCase()}`;
+  }
+
+  /**
+   * Insert a booking with its id and reference generated together.
+   *
+   * Retries on a unique-constraint violation (Prisma P2002) with a fresh id.
+   * A clash needs two uuids to agree on their first 8 hex characters, so
+   * this should never fire — but a booking failing because of it would be a
+   * poor way to find that out.
+   */
+  private async createWithUniqueReference(data: {
+    visitorId: string;
+    hostId: string;
+    propertyId: string;
+    startDate: Date;
+    endDate: Date;
+    totalAmount: number;
+    commissionAmount: number;
+    status: BookingStatus;
+  }) {
+    const include = {
+      property: { select: { id: true, title: true, images: true } },
+    };
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const id = randomUUID();
+      try {
+        return await this.prisma.booking.create({
+          data: { id, reference: BookingsService.referenceFor(id), ...data },
+          include,
+        });
+      } catch (error: any) {
+        const isDuplicateReference =
+          error?.code === 'P2002' &&
+          (error?.meta?.target as string[] | undefined)?.includes('reference');
+        if (!isDuplicateReference) throw error;
+        this.logger.warn(`Booking reference collision on attempt ${attempt + 1}; retrying`);
+      }
+    }
+
+    throw new BadRequestException(
+      'Could not allocate a booking reference. Please try again.',
+    );
+  }
 
   async create(visitorId: string, createBookingDto: CreateBookingDto): Promise<BookingResponseDto> {
     const { propertyId, startDate, endDate, totalAmount } = createBookingDto;
@@ -82,27 +136,24 @@ export class BookingsService {
     // Calculate commission (based on property's commission percent)
     const commissionAmount = (totalAmount * Number(property.commissionPercent)) / 100;
 
-    // Create booking
-    const booking = await this.prisma.booking.create({
-      data: {
-        visitorId,
-        hostId: property.hostId,
-        propertyId,
-        startDate: start,
-        endDate: end,
-        totalAmount,
-        commissionAmount,
-        status: BookingStatus.PENDING,
-      },
-      include: {
-        property: {
-          select: {
-            id: true,
-            title: true,
-            images: true,
-          },
-        },
-      },
+    // Create booking.
+    //
+    // The id is generated here rather than by the database so the transfer
+    // reference can be derived from it and stored in the same insert — the
+    // visitor is shown this code to put in their bank transfer, and an admin
+    // matches it against the statement, so it has to exist from the start.
+    // `reference` is unique; on the vanishingly unlikely chance two ids share
+    // their first 8 hex characters, take a fresh id rather than fail a
+    // booking someone is trying to make.
+    const booking = await this.createWithUniqueReference({
+      visitorId,
+      hostId: property.hostId,
+      propertyId,
+      startDate: start,
+      endDate: end,
+      totalAmount,
+      commissionAmount,
+      status: BookingStatus.PENDING,
     });
 
     this.logger.log(`Booking created: ${booking.id} for property: ${property.title}`);
@@ -224,15 +275,39 @@ export class BookingsService {
    * release/refund. Pass escrowStatus to narrow to one stage.
    */
   async findAllAdmin(
-    options: { page: number; limit: number; escrowStatus?: EscrowStatus },
+    options: { page: number; limit: number; escrowStatus?: EscrowStatus; search?: string },
   ): Promise<PaginatedResult<BookingResponseDto>> {
-    const { page, limit, escrowStatus } = options;
+    const { page, limit, escrowStatus, search } = options;
     const skip = PaginationUtil.calculateSkip({ page, limit });
+
+    // Searching by reference is how an admin reconciles a bank statement, so
+    // it deliberately ignores the escrow filter and the "has proof" default:
+    // the whole point is to find a booking you only know the code for,
+    // including one whose visitor hasn't uploaded proof yet. The BK- prefix
+    // is optional, so pasting either the bare code or the full one works.
+    if (search?.trim()) {
+      const term = search.trim().replace(/^BK-/i, '');
+      const where = {
+        OR: [
+          { reference: { contains: term, mode: 'insensitive' as const } },
+          { id: { startsWith: term.toLowerCase() } },
+        ],
+      };
+      return this.runAdminBookingQuery(where, { page, limit, skip });
+    }
 
     const where = escrowStatus
       ? { escrowStatus }
       : { paymentProof: { not: null } };
 
+    return this.runAdminBookingQuery(where, { page, limit, skip });
+  }
+
+  /** Shared fetch/shape for the admin booking list, filtered or searched. */
+  private async runAdminBookingQuery(
+    where: any,
+    { page, limit, skip }: { page: number; limit: number; skip: number },
+  ): Promise<PaginatedResult<BookingResponseDto>> {
     const [bookings, total] = await Promise.all([
       this.prisma.booking.findMany({
         where,

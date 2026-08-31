@@ -5,6 +5,9 @@ export class BookingResponseDto {
   @ApiProperty()
   id: string;
 
+  @ApiProperty({ example: 'BK-CEAEAC8C', description: 'Code the visitor puts in their bank transfer description' })
+  reference: string;
+
   @ApiProperty()
   visitorId: string;
 
