@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  UnauthorizedException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -13,13 +14,21 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryUsersDto } from './dto/query-users.dto';
 import { UserResponseDto } from './dto/user-response.dto';
+import {
+  UpdatePayoutDetailsDto,
+  PayoutDetailsResponseDto,
+} from './dto/payout-details.dto';
+import { NotificationService } from '../common/services/notification.service';
 import { UserStatus } from '@prisma/client';
 
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationService: NotificationService,
+  ) {}
 
   async create(createUserDto: CreateUserDto): Promise<UserResponseDto> {
     const { email, password, roleId } = createUserDto;
@@ -201,6 +210,98 @@ export class UsersService {
   // after the app registers for push notifications, and whenever the
   // token changes (Expo can rotate it). No-ops are cheap, so callers don't
   // need to dedupe — just call this whenever a token is obtained.
+  /** The caller's own saved payout destination, or nulls if never set. */
+  async getPayoutDetails(userId: string): Promise<PayoutDetailsResponseDto> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        payoutBankName: true,
+        payoutBankCode: true,
+        payoutAccountNumber: true,
+        payoutAccountName: true,
+        payoutUpdatedAt: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return {
+      bankName: user.payoutBankName,
+      bankCode: user.payoutBankCode,
+      accountNumber: user.payoutAccountNumber,
+      accountName: user.payoutAccountName,
+      updatedAt: user.payoutUpdatedAt,
+    };
+  }
+
+  /**
+   * Change where this host's money gets sent.
+   *
+   * Gated on the account password rather than the session alone: a stolen or
+   * borrowed session is the exact scenario where quietly repointing payouts
+   * is worth an attacker's while, and the victim would not notice until the
+   * money failed to arrive. The owner is emailed afterwards for the same
+   * reason — so a change they did not make is visible immediately.
+   */
+  async updatePayoutDetails(
+    userId: string,
+    dto: UpdatePayoutDetailsDto,
+  ): Promise<PayoutDetailsResponseDto> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, firstName: true, password: true, payoutAccountNumber: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const passwordMatches = await PasswordUtil.compare(dto.password, user.password);
+    if (!passwordMatches) {
+      throw new UnauthorizedException('That password is not correct');
+    }
+
+    const previousAccount = user.payoutAccountNumber;
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        payoutBankName: dto.bankName,
+        payoutBankCode: dto.bankCode,
+        payoutAccountNumber: dto.accountNumber,
+        payoutAccountName: dto.accountName,
+        payoutUpdatedAt: new Date(),
+      },
+      select: {
+        payoutBankName: true,
+        payoutBankCode: true,
+        payoutAccountNumber: true,
+        payoutAccountName: true,
+        payoutUpdatedAt: true,
+      },
+    });
+
+    this.logger.log(`Payout details updated for user ${userId}`);
+
+    // Only the last four digits go in the email: if someone else's inbox is
+    // reading this, it should confirm a change without handing over the
+    // account it now points at.
+    const masked = `••••${dto.accountNumber.slice(-4)}`;
+    this.notificationService
+      .sendPayoutDetailsChangedEmail(user.email, user.firstName, dto.bankName, masked, !!previousAccount)
+      .catch((err) => this.logger.error(`Payout-change email to ${user.email} failed:`, err));
+
+    return {
+      bankName: updated.payoutBankName,
+      bankCode: updated.payoutBankCode,
+      accountNumber: updated.payoutAccountNumber,
+      accountName: updated.payoutAccountName,
+      updatedAt: updated.payoutUpdatedAt,
+    };
+  }
+
   async updatePushToken(id: string, pushToken: string | null): Promise<void> {
     await this.prisma.user.update({
       where: { id },

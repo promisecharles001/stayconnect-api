@@ -3,7 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 
 interface NotificationPayload {
-  type: 'KYC_SUBMITTED' | 'PROPERTY_SUBMITTED' | 'KYC_REVIEWED' | 'PROPERTY_REVIEWED' | 'PASSWORD_RESET';
+  type:
+    | 'KYC_SUBMITTED'
+    | 'PROPERTY_SUBMITTED'
+    | 'KYC_REVIEWED'
+    | 'PROPERTY_REVIEWED'
+    | 'PASSWORD_RESET'
+    | 'PAYOUT_DETAILS_CHANGED';
   recipientEmail: string;
   subject: string;
   message: string;
@@ -109,6 +115,39 @@ export class NotificationService {
       subject: `New Property Listing Submitted - ${propertyTitle}`,
       message: `A new property "${propertyTitle}" has been submitted by ${hostName} (${hostEmail}). Please review it in the admin dashboard before it goes live.`,
       data: { propertyTitle, hostName, hostEmail },
+    });
+  }
+
+  /**
+   * Tell a host their payout destination changed.
+   *
+   * The point is detection, not confirmation: if someone else made this
+   * change, this email is how the owner finds out before a payout lands in
+   * the wrong account. Only the last four digits are included, so the mail
+   * itself doesn't hand over the new destination.
+   */
+  async sendPayoutDetailsChangedEmail(
+    email: string,
+    firstName: string,
+    bankName: string,
+    maskedAccount: string,
+    hadPrevious: boolean,
+  ): Promise<void> {
+    await this.sendAdminNotification({
+      type: 'PAYOUT_DETAILS_CHANGED',
+      recipientEmail: email,
+      subject: hadPrevious
+        ? 'Your StayConnect NG payout account was changed'
+        : 'Payout account added to your StayConnect NG account',
+      message:
+        `Hi ${firstName},\n\n` +
+        `${hadPrevious ? 'The bank account your StayConnect NG earnings are sent to has been changed' : 'A bank account has been added for your StayConnect NG earnings'}.\n\n` +
+        `Bank: ${bankName}\nAccount: ${maskedAccount}\n\n` +
+        `If this was you, no action is needed.\n\n` +
+        `If it was NOT you, someone may have access to your account. Change ` +
+        `your password immediately and contact support — future earnings ` +
+        `would otherwise be paid to that account.`,
+      data: { bankName, maskedAccount },
     });
   }
 

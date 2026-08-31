@@ -34,6 +34,14 @@ model User {
   pushToken          String?
   passwordResetTokenHash String?
   passwordResetExpiresAt DateTime?
+  // Saved payout destination, so a host doesn't retype it on every
+  // withdrawal. Deliberately not in USER_SAFE_SELECT — these are returned
+  // only to the owner, never in the admin user list or any public response.
+  payoutBankName      String?
+  payoutBankCode      String?
+  payoutAccountNumber String?
+  payoutAccountName   String?
+  payoutUpdatedAt     DateTime?
   bookings           Booking[]           @relation("VisitorBookings")
   hostBookings       Booking[]           @relation("HostBookings")
   earnings           EarningsLedger[]

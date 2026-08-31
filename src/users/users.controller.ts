@@ -19,6 +19,10 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryUsersDto } from './dto/query-users.dto';
 import { UserResponseDto } from './dto/user-response.dto';
+import {
+  UpdatePayoutDetailsDto,
+  PayoutDetailsResponseDto,
+} from './dto/payout-details.dto';
 import { PaginatedResponseDto, ApiPaginatedResponse } from '../common/decorators/api-paginated-response.decorator';
 import { UserStatus } from '@prisma/client';
 
@@ -27,6 +31,29 @@ import { UserStatus } from '@prisma/client';
 @ApiBearerAuth()
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
+
+  @Get('me/payout-details')
+  @ApiOperation({ summary: "Get the current user's saved payout bank details" })
+  async getMyPayoutDetails(
+    @CurrentUser('id') userId: string,
+  ): Promise<PayoutDetailsResponseDto> {
+    return this.usersService.getPayoutDetails(userId);
+  }
+
+  @Patch('me/payout-details')
+  @ApiOperation({
+    summary: "Update the current user's payout bank details (password required)",
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Password incorrect',
+  })
+  async updateMyPayoutDetails(
+    @CurrentUser('id') userId: string,
+    @Body() dto: UpdatePayoutDetailsDto,
+  ): Promise<PayoutDetailsResponseDto> {
+    return this.usersService.updatePayoutDetails(userId, dto);
+  }
 
   @Patch('me/push-token')
   @HttpCode(HttpStatus.NO_CONTENT)
