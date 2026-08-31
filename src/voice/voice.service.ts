@@ -1,10 +1,18 @@
-import { Injectable, Logger, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  ForbiddenException,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AccessToken, RoomServiceClient, CreateOptions } from 'livekit-server-sdk';
 import { PrismaService } from '../prisma/prisma.service';
+import { PushNotificationService } from '../common/services/push-notification.service';
 
 export interface TokenGenerationParams {
-  bookingId: string;
+  bookingId?: string;
+  propertyId?: string;
   participantName?: string;
 }
 
@@ -27,6 +35,7 @@ export class VoiceService {
   constructor(
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly pushNotifications: PushNotificationService,
   ) {
     this.apiKey = this.configService.get<string>('LIVEKIT_API_KEY') || '';
     this.apiSecret = this.configService.get<string>('LIVEKIT_API_SECRET') || '';
@@ -65,51 +74,90 @@ export class VoiceService {
   }
 
   /**
-   * Generate a LiveKit access token for a booking voice call.
-   * The caller must be the visitor or host of the booking, and payment must
-   * be verified — enforcing that contact only happens after the platform
-   * has confirmed money was received.
+   * Generate a LiveKit access token for a voice call.
+   *
+   * Two entry points, both of which put the two parties in the same
+   * deterministic room so the callee can join what the caller opened:
+   *
+   *  - bookingId  — caller must be that booking's visitor or host.
+   *  - propertyId — a visitor calling a host about a listing, before any
+   *                 booking exists. The host of the property is the callee.
+   *
+   * Calls used to require a booking with verified payment. That gate was
+   * removed deliberately: enquiring by phone before booking is the point.
+   * Note this weakens the anti-circumvention posture that pairs with message
+   * redaction — the two parties can now reach each other before any money
+   * moves through the platform.
    */
   async generateToken(params: TokenGenerationParams, userId: string): Promise<GeneratedToken> {
-    const { bookingId, participantName } = params;
+    const { bookingId, propertyId, participantName } = params;
 
     if (!this.apiKey || !this.apiSecret || !this.serverUrl) {
       throw new Error('LiveKit credentials are not configured');
     }
 
-    // Load the booking and verify the caller is a participant
-    const booking = await this.prisma.booking.findUnique({
-      where: { id: bookingId },
-      include: {
-        visitor: { select: { firstName: true, lastName: true } },
-        host: { select: { firstName: true, lastName: true } },
-        property: { select: { title: true } },
-      },
-    });
-
-    if (!booking) {
-      throw new NotFoundException('Booking not found');
+    if (!bookingId && !propertyId) {
+      throw new BadRequestException('Provide either a bookingId or a propertyId');
     }
 
-    const isParticipant = booking.visitorId === userId || booking.hostId === userId;
-    if (!isParticipant) {
-      throw new ForbiddenException('You are not a participant in this booking');
+    let roomName: string;
+    let identity: string;
+    let calleeId: string;
+    let contextTitle: string;
+
+    if (bookingId) {
+      const booking = await this.prisma.booking.findUnique({
+        where: { id: bookingId },
+        include: {
+          visitor: { select: { firstName: true, lastName: true } },
+          host: { select: { firstName: true, lastName: true } },
+          property: { select: { title: true } },
+        },
+      });
+
+      if (!booking) {
+        throw new NotFoundException('Booking not found');
+      }
+
+      const isParticipant = booking.visitorId === userId || booking.hostId === userId;
+      if (!isParticipant) {
+        throw new ForbiddenException('You are not a participant in this booking');
+      }
+
+      roomName = `booking-${bookingId}`;
+      const isVisitor = booking.visitorId === userId;
+      const person = isVisitor ? booking.visitor : booking.host;
+      identity = participantName || `${person.firstName} ${person.lastName}`;
+      calleeId = isVisitor ? booking.hostId : booking.visitorId;
+      contextTitle = booking.property?.title ?? 'your booking';
+    } else {
+      const property = await this.prisma.property.findUnique({
+        where: { id: propertyId },
+        select: { id: true, title: true, hostId: true },
+      });
+
+      if (!property) {
+        throw new NotFoundException('Property not found');
+      }
+
+      const caller = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { firstName: true, lastName: true },
+      });
+
+      // One room per (property, visitor) pair. When the host answers the
+      // push we send below, they are handed this same name, so both sides
+      // land in the same room without a booking to key off.
+      const visitorId = property.hostId === userId ? null : userId;
+      if (!visitorId) {
+        throw new ForbiddenException('You cannot call yourself about your own listing');
+      }
+
+      roomName = `property-${property.id}-${visitorId}`;
+      identity = participantName || `${caller?.firstName ?? ''} ${caller?.lastName ?? ''}`.trim() || 'Visitor';
+      calleeId = property.hostId;
+      contextTitle = property.title;
     }
-
-    // Gate: voice calls are only allowed after payment is verified
-    if (!booking.paymentVerified) {
-      throw new ForbiddenException(
-        'Voice calls are unlocked after payment is verified. ' +
-        'Upload your payment receipt and wait for admin confirmation.',
-      );
-    }
-
-    // Both visitor and host get a token for the SAME deterministic room
-    const roomName = `booking-${bookingId}`;
-
-    const isVisitor = booking.visitorId === userId;
-    const person = isVisitor ? booking.visitor : booking.host;
-    const identity = participantName || `${person.firstName} ${person.lastName}`;
 
     const accessToken = new AccessToken(this.apiKey, this.apiSecret, {
       identity,
@@ -128,8 +176,21 @@ export class VoiceService {
     const token = await accessToken.toJwt();
 
     this.logger.log(
-      `LiveKit token issued — booking: ${bookingId}, user: ${userId} (${isVisitor ? 'visitor' : 'host'}), room: ${roomName}`,
+      `LiveKit token issued — ${bookingId ? `booking: ${bookingId}` : `property: ${propertyId}`}, ` +
+        `caller: ${userId}, room: ${roomName}`,
     );
+
+    // Ring the other side. Without this the caller sits alone in a room the
+    // callee has no way of knowing exists — there is no signalling channel
+    // here beyond the push. Never let a failed push fail the call: the
+    // caller can still be joined by someone who opens the same room.
+    this.pushNotifications
+      .sendToUser(calleeId, {
+        title: `${identity} is calling`,
+        body: `About ${contextTitle}`,
+        data: { type: 'call', roomName, propertyId, bookingId, callerName: identity },
+      })
+      .catch((err) => this.logger.error(`Call push to ${calleeId} failed:`, err));
 
     return {
       token,
