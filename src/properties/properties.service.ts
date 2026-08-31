@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  ConflictException,
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -387,6 +388,19 @@ export class PropertiesService {
     // Check permission
     if (property.hostId !== hostId && !hostRole.includes('ADMIN')) {
       throw new ForbiddenException('You do not have permission to delete this property');
+    }
+
+    // Bookings reference the property without a cascade, on purpose — a
+    // stay that happened is financial history and shouldn't vanish because
+    // the listing was taken down. Postgres blocks the delete, which came
+    // back as a 500 carrying the raw Prisma error. Say what's actually
+    // wrong, and point at the action that does what they meant.
+    const bookings = await this.prisma.booking.count({ where: { propertyId: id } });
+    if (bookings > 0) {
+      throw new ConflictException(
+        `This listing can't be deleted because it has ${bookings} booking(s) against it. ` +
+          `Set its status to INACTIVE or SUSPENDED to take it off the site while keeping the booking history.`,
+      );
     }
 
     await this.prisma.property.delete({

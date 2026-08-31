@@ -186,7 +186,28 @@ export class UsersService {
       throw new NotFoundException(`User with ID '${id}' not found`);
     }
 
-    // Delete user
+    // Bookings, earnings and withdrawals deliberately have no cascade to
+    // User: they are financial history, and deleting an account should not
+    // silently erase the record of money that moved. Postgres therefore
+    // refuses the delete, which surfaced as a 500 with the raw Prisma error
+    // in the response body. Refuse it deliberately instead, and say what to
+    // do about it.
+    const [bookings, withdrawals, earnings] = await Promise.all([
+      this.prisma.booking.count({
+        where: { OR: [{ visitorId: id }, { hostId: id }] },
+      }),
+      this.prisma.withdrawalRequest.count({ where: { hostId: id } }),
+      this.prisma.earningsLedger.count({ where: { hostId: id } }),
+    ]);
+
+    if (bookings > 0 || withdrawals > 0 || earnings > 0) {
+      throw new ConflictException(
+        `This account can't be deleted because it has financial history ` +
+          `(${bookings} booking(s), ${withdrawals} withdrawal(s), ${earnings} earnings entr(ies)). ` +
+          `Suspend the account instead — that blocks access without erasing the record.`,
+      );
+    }
+
     await this.prisma.user.delete({
       where: { id },
     });
