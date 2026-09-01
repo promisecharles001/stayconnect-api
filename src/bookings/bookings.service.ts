@@ -629,11 +629,14 @@ export class BookingsService {
       );
     }
 
-    const totalAmount = new Decimal(booking.totalAmount);
-    if (refundDto.feeAmount > totalAmount.toNumber()) {
-      throw new BadRequestException('Fee amount cannot exceed the total booking amount');
-    }
-    const refundAmount = totalAmount.minus(refundDto.feeAmount).toNumber();
+    // A refund returns everything the visitor paid. No fee is retained.
+    //
+    // This used to subtract a caller-supplied feeAmount, and the admin app
+    // passed the commission, so a refunded visitor silently got back less
+    // than they paid. The amount is decided here rather than by the caller
+    // so no client can change what a refund is worth; feeAmount is still
+    // accepted and ignored, so older app versions don't break.
+    const refundAmount = new Decimal(booking.totalAmount).toNumber();
 
     const updatedBooking = await this.prisma.booking.update({
       where: { id },
@@ -650,7 +653,7 @@ export class BookingsService {
       },
     });
 
-    this.logger.log(`Booking ${id} refunded: ${refundAmount} to visitor ${booking.visitorId} (fee: ${refundDto.feeAmount})`);
+    this.logger.log(`Booking ${id} refunded in full: ${refundAmount} to visitor ${booking.visitorId}`);
 
     void this.pushNotificationService.sendToUser(booking.visitorId, {
       title: 'Refund processed',

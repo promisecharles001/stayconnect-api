@@ -22,12 +22,17 @@ export class VerifyPaymentDto {
 
 export class RefundBookingDto {
   @ApiProperty({
-    example: 5000,
-    description: 'Inspection/platform fee kept from the total amount before refunding the rest to the visitor.',
+    required: false,
+    deprecated: true,
+    description:
+      'Ignored. Refunds return the full amount — no fee is retained. Still ' +
+      'accepted so app versions that predate this change keep working ' +
+      'instead of failing validation on an unknown property.',
   })
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  feeAmount: number;
+  feeAmount?: number;
 
   @ApiProperty({ example: 'Visitor inspected the apartment and it did not match the listing.', required: false })
   @IsOptional()
