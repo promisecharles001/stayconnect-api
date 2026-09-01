@@ -68,6 +68,31 @@ async function main() {
   // Deliberately no demo host/guest/property/booking data — this seed runs
   // on every production deploy (render.yaml), so anything created here
   // shows up as real listings to real users. Roles + admin account only.
+
+  // Backfill transfer references for bookings made before the column
+  // existed. This lives here rather than in a migration because the deploy
+  // runs `prisma db push`, which skips migration files entirely — so this
+  // step is the only thing that will actually run against production.
+  //
+  // The expression matches what the client used to derive on the fly,
+  // 'BK-' + first 8 characters of the id, uppercased. Visitors have already
+  // been given those codes for transfers that may not be reconciled yet, so
+  // they have to keep resolving to the same booking.
+  const unreferenced = await prisma.booking.findMany({
+    where: { reference: null },
+    select: { id: true },
+  });
+
+  if (unreferenced.length > 0) {
+    for (const booking of unreferenced) {
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: { reference: `BK-${booking.id.slice(0, 8).toUpperCase()}` },
+      });
+    }
+    console.log(`🔖 Backfilled ${unreferenced.length} booking reference(s)`);
+  }
+
   console.log('\n✅ Database seed completed successfully!');
   console.log('\n📧 Admin account:', adminEmail, '(password from DEFAULT_ADMIN_PASSWORD env var)');
 }

@@ -325,6 +325,10 @@ export class BookingsService {
 
     const convertedBookings = bookings.map(booking => ({
       ...booking,
+      // Never hand out a null reference: the column is nullable only so the
+      // deploy could add it to a table with existing rows, and the seed
+      // backfills straight after. Deriving covers the gap between the two.
+      reference: booking.reference ?? BookingsService.referenceFor(booking.id),
       totalAmount: Number(booking.totalAmount),
       commissionAmount: Number(booking.commissionAmount),
       refundAmount: booking.refundAmount ? Number(booking.refundAmount) : null,

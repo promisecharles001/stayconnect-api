@@ -166,9 +166,14 @@ model Booking {
   id               String        @id @default(uuid())
   // The short code the visitor puts in their bank transfer description, and
   // what an admin searches to match a line on the statement to a booking.
-  // Stored rather than derived so it can be queried and can never drift
-  // from whatever the visitor was shown.
-  reference        String        @unique
+  // Stored rather than derived so it can be queried.
+  //
+  // Nullable because this deploys with `prisma db push`, which cannot add a
+  // required column to a table that already has rows. Existing bookings are
+  // backfilled by the seed step that runs straight after, and every new
+  // booking sets it on insert — so it is null only in the gap between those
+  // two, and the service falls back to deriving it from the id regardless.
+  reference        String?       @unique
   visitorId        String
   hostId           String
   propertyId       String
