@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A second push to the same branch cancels the run still in progress — the
+# older result is about to be irrelevant anyway.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Typecheck and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        # Deliberately not fetching submodules: `frontend` is registered as a
+        # gitlink but has no remote, so asking for it would fail the checkout.
+        # The app is not covered here; only this repo is.
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      # `npm ci` runs postinstall, which is `prisma generate`. That reads the
+      # schema and never connects, so it needs no DATABASE_URL — checked
+      # rather than assumed.
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npm test
+
+      # Catches whatever `nest build` rejects that `tsc --noEmit` alone does
+      # not, here rather than on a Render deploy.
+      - name: Build
+        run: npm run build
