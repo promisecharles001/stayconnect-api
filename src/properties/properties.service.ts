@@ -135,8 +135,11 @@ export class PropertiesService {
     // Build where clause
     const where: any = {};
 
-    // Only show approved properties for public search
+    // Only show approved properties for public search, and only ones the
+    // host currently has on the market. A host toggling availability off
+    // takes the listing out of search without touching its moderation state.
     where.status = status || PropertyStatus.APPROVED;
+    where.isAvailable = true;
 
     if (search) {
       // state and address were missing here, so the single most likely query
@@ -335,6 +338,47 @@ export class PropertiesService {
     } as unknown as PropertyResponseDto;
   }
 
+  /**
+   * Take a listing off the market, or put it back.
+   *
+   * Separate from update() on purpose: this is the one property field a host
+   * is allowed to flip freely, and routing it through the general update
+   * would drag it into the moderation rules — editing an approved listing
+   * sends it back for review, which is not what "I'm booked up this week"
+   * should do.
+   */
+  async setAvailability(
+    id: string,
+    userId: string,
+    userRole: string,
+    isAvailable: boolean,
+  ): Promise<PropertyResponseDto> {
+    const property = await this.prisma.property.findUnique({ where: { id } });
+
+    if (!property) {
+      throw new NotFoundException(`Property with ID '${id}' not found`);
+    }
+
+    if (property.hostId !== userId && !userRole.includes('ADMIN')) {
+      throw new ForbiddenException('You do not have permission to update this property');
+    }
+
+    const updated = await this.prisma.property.update({
+      where: { id },
+      data: { isAvailable },
+    });
+
+    this.logger.log(`Property ${id} availability set to ${isAvailable}`);
+
+    return {
+      ...updated,
+      basePricePerNight: Number(updated.basePricePerNight),
+      cleaningFee: updated.cleaningFee ? Number(updated.cleaningFee) : null,
+      commissionPercent: Number(updated.commissionPercent),
+      averageRating: updated.averageRating ?? 0,
+    } as unknown as PropertyResponseDto;
+  }
+
   async update(
     id: string,
     hostId: string,
@@ -354,9 +398,23 @@ export class PropertiesService {
       throw new ForbiddenException('You do not have permission to update this property');
     }
 
-    // Prevent updates to approved properties (require admin approval)
-    if (property.status === PropertyStatus.APPROVED && !hostRole.includes('ADMIN')) {
-      updatePropertyDto.status = PropertyStatus.PENDING_APPROVAL;
+    // `status` is a moderation decision and belongs to admins only.
+    //
+    // This used to only intervene when the property was ALREADY approved,
+    // which left the gap wide open: a host could PATCH status:'APPROVED'
+    // onto their own PENDING_APPROVAL listing and it went live, publicly
+    // searchable, without anyone reviewing it. The same trick brought back a
+    // listing an admin had REJECTED or SUSPENDED. Verified against
+    // production before fixing.
+    //
+    // Non-admins never get to set it. Editing an approved listing still
+    // sends it back for re-review, which was the original intent.
+    if (!hostRole.includes('ADMIN')) {
+      delete updatePropertyDto.status;
+
+      if (property.status === PropertyStatus.APPROVED) {
+        updatePropertyDto.status = PropertyStatus.PENDING_APPROVAL;
+      }
     }
 
     const updatedProperty = await this.prisma.property.update({

@@ -19,6 +19,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
+import { SetAvailabilityDto } from './dto/set-availability.dto';
 import { QueryPropertiesDto } from './dto/query-properties.dto';
 import { PropertyResponseDto } from './dto/property-response.dto';
 import { ApiPaginatedResponse } from '../common/decorators/api-paginated-response.decorator';
@@ -111,6 +112,18 @@ export class PropertiesController {
     @CurrentUser('role') userRole: Role,
   ): Promise<void> {
     return this.propertiesService.remove(id, hostId, userRole.name);
+  }
+
+  @Patch(':id/availability')
+  @ApiOperation({ summary: "Take a listing off the market or put it back (host or admin)" })
+  @ApiParam({ name: 'id', description: 'Property ID', type: 'string' })
+  async setAvailability(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: Role,
+    @Body() dto: SetAvailabilityDto,
+  ): Promise<PropertyResponseDto> {
+    return this.propertiesService.setAvailability(id, userId, userRole.name, dto.isAvailable);
   }
 
   @Patch(':id/review')

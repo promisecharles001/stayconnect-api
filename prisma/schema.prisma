@@ -105,6 +105,12 @@ model KYCVerification {
 
 model Property {
   id                String         @id @default(uuid())
+  // Host-controlled: whether the listing is currently on the market. Kept
+  // separate from `status`, which is the admin moderation decision — a host
+  // must be able to take their own listing down without being able to
+  // approve it, and an admin's SUSPENDED must not be undoable by toggling
+  // availability back on.
+  isAvailable       Boolean        @default(true)
   hostId            String
   title             String
   description       String
