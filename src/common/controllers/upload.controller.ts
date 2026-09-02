@@ -12,9 +12,16 @@ import { CloudinaryService } from '../services/cloudinary.service';
 // Folders this endpoint is allowed to upload into. Keep this an allowlist
 // (rather than accepting any client-supplied path) so a caller can't write
 // into arbitrary Cloudinary folders.
+// An allowlist rather than free-form input: `folder` reaches Cloudinary, and
+// letting a caller choose an arbitrary path would let them write anywhere in
+// the account.
 const ALLOWED_FOLDERS: Record<string, string> = {
   properties: 'stayconnect/properties',
   kyc: 'stayconnect/kyc',
+  // Bank transfer receipts. Kept out of `properties` deliberately: these
+  // carry account numbers and real names, so they should not sit among
+  // listing photos where anyone browsing the media library would meet them.
+  'payment-proofs': 'stayconnect/payment-proofs',
 };
 
 @ApiTags('Upload')
