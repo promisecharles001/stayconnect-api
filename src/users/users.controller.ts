@@ -23,6 +23,7 @@ import {
   UpdatePayoutDetailsDto,
   PayoutDetailsResponseDto,
 } from './dto/payout-details.dto';
+import { UpdateAvatarDto } from './dto/update-avatar.dto';
 import { PaginatedResponseDto, ApiPaginatedResponse } from '../common/decorators/api-paginated-response.decorator';
 import { UserStatus } from '@prisma/client';
 
@@ -53,6 +54,15 @@ export class UsersController {
     @Body() dto: UpdatePayoutDetailsDto,
   ): Promise<PayoutDetailsResponseDto> {
     return this.usersService.updatePayoutDetails(userId, dto);
+  }
+
+  @Patch('me/avatar')
+  @ApiOperation({ summary: "Set the current user's profile picture" })
+  async updateMyAvatar(
+    @CurrentUser('id') userId: string,
+    @Body() dto: UpdateAvatarDto,
+  ): Promise<UserResponseDto> {
+    return this.usersService.updateOwnAvatar(userId, dto.avatarUrl);
   }
 
   @Patch('me/push-token')

@@ -22,6 +22,7 @@ const ALLOWED_FOLDERS: Record<string, string> = {
   // carry account numbers and real names, so they should not sit among
   // listing photos where anyone browsing the media library would meet them.
   'payment-proofs': 'stayconnect/payment-proofs',
+  avatars: 'stayconnect/avatars',
 };
 
 @ApiTags('Upload')

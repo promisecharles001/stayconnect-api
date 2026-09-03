@@ -323,6 +323,24 @@ export class UsersService {
     };
   }
 
+  /**
+   * Set the caller's own profile picture.
+   *
+   * Separate from update(), which is admin-only — a user changing their own
+   * avatar should not need an admin, and should not be able to reach any
+   * other field while doing it.
+   */
+  async updateOwnAvatar(userId: string, avatarUrl: string): Promise<UserResponseDto> {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { avatarUrl },
+      select: USER_SAFE_SELECT,
+    });
+
+    this.logger.log(`Avatar updated for user ${userId}`);
+    return user as unknown as UserResponseDto;
+  }
+
   async updatePushToken(id: string, pushToken: string | null): Promise<void> {
     await this.prisma.user.update({
       where: { id },
