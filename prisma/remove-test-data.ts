@@ -1,10 +1,11 @@
 /**
- * Removes the @example.com test accounts left behind by QA passes, and
- * everything that references them.
+ * Removes the test accounts left behind by QA passes, and everything that
+ * references them.
  *
  * Scope is deliberately narrow: only users whose email ends in
- * "@example.com". That domain is reserved by RFC 2606 for exactly this, and
- * no real account on this deployment uses it — every genuine user is on
+ * "@example.com" or "@e2e-test.invalid". Both domains are reserved by RFC
+ * (2606 and 6761 respectively) for exactly this, cannot receive mail, and no
+ * real account on this deployment uses them — every genuine user is on
  * gmail.com or stayconnect.ng. Nothing else is matched, so this cannot touch
  * a customer account, the admins, or the roles table.
  *
@@ -25,14 +26,24 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 const EXECUTE = process.argv.includes('--yes');
 
+// Kept as a list so adding a future throwaway domain is one line, and so the
+// dry-run message and the delete can never disagree about what is in scope.
+const TEST_EMAIL_DOMAINS = ['@example.com', '@e2e-test.invalid'];
+
 async function main() {
   const testUsers = await prisma.user.findMany({
-    where: { email: { endsWith: '@example.com' } },
+    where: {
+      OR: TEST_EMAIL_DOMAINS.map((domain) => ({
+        email: { endsWith: domain },
+      })),
+    },
     select: { id: true, email: true, role: { select: { name: true } } },
   });
 
   if (testUsers.length === 0) {
-    console.log('No @example.com accounts found — nothing to clean up.');
+    console.log(
+      `No ${TEST_EMAIL_DOMAINS.join(' or ')} accounts found — nothing to clean up.`,
+    );
     return;
   }
 
@@ -102,8 +113,14 @@ async function main() {
   await prisma.kYCVerification.deleteMany({ where: { userId: { in: userIds } } });
   await prisma.user.deleteMany({ where: { id: { in: userIds } } });
 
-  const left = await prisma.user.count({ where: { email: { endsWith: '@example.com' } } });
-  console.log(`Done. Remaining @example.com accounts: ${left}`);
+  const left = await prisma.user.count({
+    where: {
+      OR: TEST_EMAIL_DOMAINS.map((domain) => ({
+        email: { endsWith: domain },
+      })),
+    },
+  });
+  console.log(`Done. Remaining test accounts: ${left}`);
 }
 
 main()
