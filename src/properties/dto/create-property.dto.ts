@@ -8,7 +8,9 @@ import {
   Min,
   IsArray,
   IsUrl,
+  IsBoolean,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { PropertyType } from '@prisma/client';
 
 export class CreatePropertyDto {
@@ -125,6 +127,24 @@ export class CreatePropertyDto {
 
   @ApiProperty({ example: true, required: false })
   @IsOptional()
+  // Same trap as SetAvailabilityDto: with enableImplicitConversion the string
+  // "false" coerces by truthiness to `true`, and with no @IsBoolean at all
+  // nothing was checking the type in the first place — any value whatsoever
+  // was accepted and stored. Read the raw body so the check happens before
+  // conversion, and reject anything that isn't genuinely a boolean.
+  @Transform(({ obj }) => {
+    const raw = obj?.isInstantBook;
+    if (typeof raw === 'boolean') return raw;
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    // Absent (or explicitly null) means "don't change this" — @IsOptional
+    // skips both. Anything else is handed back untouched so @IsBoolean sees
+    // the original garbage and rejects it; returning null here instead would
+    // ALSO be skipped by @IsOptional and let the bad value through silently.
+    if (raw === undefined || raw === null) return undefined;
+    return raw;
+  })
+  @IsBoolean({ message: 'isInstantBook must be true or false' })
   isInstantBook?: boolean;
 
   @ApiProperty({ example: 1, minimum: 1, required: false })
