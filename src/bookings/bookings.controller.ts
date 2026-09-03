@@ -11,7 +11,7 @@ import {
   ParseUUIDPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
-import { EscrowStatus, Role } from '@prisma/client';
+import { BookingStatus, EscrowStatus, Role } from '@prisma/client';
 import { BookingsService } from './bookings.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -63,10 +63,15 @@ export class BookingsController {
     @CurrentUser('id') hostId: string,
     @Query('page') page = 1,
     @Query('limit') limit = 10,
+    // The app has always sent this; it was simply not read, so the Booking
+    // Requests screen received every booking instead of only the pending
+    // ones and showed accepted bookings as outstanding requests.
+    @Query('status') status?: BookingStatus,
   ) {
     return this.bookingsService.findByHost(hostId, {
       page: parseInt(page as any, 10),
       limit: parseInt(limit as any, 10),
+      status,
     });
   }
 

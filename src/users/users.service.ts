@@ -330,7 +330,10 @@ export class UsersService {
    * avatar should not need an admin, and should not be able to reach any
    * other field while doing it.
    */
-  async updateOwnAvatar(userId: string, avatarUrl: string): Promise<UserResponseDto> {
+  async updateOwnAvatar(
+    userId: string,
+    avatarUrl: string | null,
+  ): Promise<UserResponseDto> {
     const user = await this.prisma.user.update({
       where: { id: userId },
       data: { avatarUrl },

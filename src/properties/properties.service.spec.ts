@@ -142,6 +142,12 @@ describe('PropertiesService', () => {
       expect(where.isAvailable).toBe(true);
     });
 
+    // Each search word becomes one AND entry holding an OR over the columns.
+    const termsOf = (call: any) =>
+      call.where.AND.map((entry: any) =>
+        entry.OR[0][Object.keys(entry.OR[0])[0]].contains,
+      );
+
     it('searches state and address, not just city', async () => {
       prisma.property.count.mockResolvedValue(0);
       prisma.property.findMany.mockResolvedValue([]);
@@ -151,10 +157,81 @@ describe('PropertiesService', () => {
       // Cards read "Lekki, Lagos" and the box invites a city or area, so
       // searching the state returning nothing was the likeliest query
       // failing.
-      const fields = prisma.property.findMany.mock.calls[0][0].where.OR.map(
+      const fields = prisma.property.findMany.mock.calls[0][0].where.AND[0].OR.map(
         (clause: any) => Object.keys(clause)[0],
       );
       expect(fields).toEqual(expect.arrayContaining(['city', 'state', 'address']));
+    });
+
+    it('matches a typed phrase word by word, not as one literal string', async () => {
+      prisma.property.count.mockResolvedValue(0);
+      prisma.property.findMany.mockResolvedValue([]);
+
+      // The tester typed exactly this and got "0 places" while "Abuja"
+      // alone returned three, because no column holds the whole phrase.
+      await service.findAll({
+        page: 1,
+        limit: 10,
+        search: 'Stays in Abuja',
+      } as any);
+
+      expect(termsOf(prisma.property.findMany.mock.calls[0][0])).toEqual(['Abuja']);
+    });
+
+    it('requires every meaningful word, so results narrow rather than widen', async () => {
+      prisma.property.count.mockResolvedValue(0);
+      prisma.property.findMany.mockResolvedValue([]);
+
+      await service.findAll({
+        page: 1,
+        limit: 10,
+        search: 'Studio Apartment Abuja',
+      } as any);
+
+      const call = prisma.property.findMany.mock.calls[0][0];
+      expect(termsOf(call)).toEqual(['Studio', 'Apartment', 'Abuja']);
+      expect(call.where.AND).toHaveLength(3);
+    });
+
+    it('keeps property-type words as real search terms', async () => {
+      prisma.property.count.mockResolvedValue(0);
+      prisma.property.findMany.mockResolvedValue([]);
+
+      // Dropping "apartment" as filler would make this match houses too.
+      await service.findAll({
+        page: 1,
+        limit: 10,
+        search: 'apartment in Abuja',
+      } as any);
+
+      expect(termsOf(prisma.property.findMany.mock.calls[0][0])).toEqual([
+        'apartment',
+        'Abuja',
+      ]);
+    });
+
+    it('falls back to the words typed when the query is all filler', async () => {
+      prisma.property.count.mockResolvedValue(0);
+      prisma.property.findMany.mockResolvedValue([]);
+
+      // Stripping every word would leave no constraint and return the whole
+      // country, which is worse than returning nothing.
+      await service.findAll({ page: 1, limit: 10, search: 'a place to stay' } as any);
+
+      const call = prisma.property.findMany.mock.calls[0][0];
+      expect(call.where.AND.length).toBeGreaterThan(0);
+      expect(termsOf(call)).toEqual(['a', 'place', 'to', 'stay']);
+    });
+
+    it('still applies the approved-and-available filter alongside a search', async () => {
+      prisma.property.count.mockResolvedValue(0);
+      prisma.property.findMany.mockResolvedValue([]);
+
+      await service.findAll({ page: 1, limit: 10, search: 'Stays in Abuja' } as any);
+
+      const { where } = prisma.property.findMany.mock.calls[0][0];
+      expect(where.status).toBe('APPROVED');
+      expect(where.isAvailable).toBe(true);
     });
   });
 

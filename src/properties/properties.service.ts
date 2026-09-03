@@ -142,18 +142,50 @@ export class PropertiesService {
     where.isAvailable = true;
 
     if (search) {
-      // state and address were missing here, so the single most likely query
-      // found nothing: listings render as "Lekki, Lagos" and the search box
-      // invites a "city, area or property", but searching the state — which
-      // is how people search in Nigeria — matched no column and returned an
-      // empty result for an area that clearly has listings.
-      where.OR = [
-        { title: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
-        { city: { contains: search, mode: 'insensitive' } },
-        { state: { contains: search, mode: 'insensitive' } },
-        { address: { contains: search, mode: 'insensitive' } },
+      // Matched as one literal string, "Stays in Abuja" found nothing while
+      // "Abuja" found three — because no single column contains the whole
+      // phrase. People type sentences into a search box, so split the query
+      // and require each meaningful word to appear somewhere on the listing.
+      //
+      // state and address are in the field list because listings render as
+      // "Lekki, Lagos" and searching the state is how people search in
+      // Nigeria; matching only title/description/city returned nothing for
+      // areas that clearly had listings.
+      const fieldsFor = (term: string) => [
+        { title: { contains: term, mode: 'insensitive' } },
+        { description: { contains: term, mode: 'insensitive' } },
+        { city: { contains: term, mode: 'insensitive' } },
+        { state: { contains: term, mode: 'insensitive' } },
+        { address: { contains: term, mode: 'insensitive' } },
       ];
+
+      // Filler words carry no meaning here and would match almost every
+      // description, so dropping them keeps results tight rather than
+      // returning everything for "a place in Lagos".
+      // Grammatical filler and generic words for "somewhere to sleep" only.
+      // Deliberately NOT apartment/house/studio/room: those are real search
+      // terms that appear in listing titles, and dropping them would make
+      // "apartment in Abuja" return every house in Abuja too.
+      const STOP_WORDS = new Set([
+        'in', 'at', 'on', 'the', 'a', 'an', 'of', 'for', 'to', 'near',
+        'me', 'my', 'and', 'or', 'with', 'find', 'show', 'search',
+        'stay', 'stays', 'staying', 'place', 'places', 'available',
+      ]);
+
+      const words = search
+        .split(/[\s,]+/)
+        .map((w) => w.trim())
+        .filter(Boolean);
+
+      const terms = words.filter((w) => !STOP_WORDS.has(w.toLowerCase()));
+
+      // If the query was nothing but filler ("a place to stay"), fall back to
+      // the words as typed rather than matching every listing in the country.
+      const effective = terms.length > 0 ? terms : words;
+
+      // AND across words, OR across columns: "2 bedroom Lekki" should mean
+      // both, not either. A single-word query behaves exactly as before.
+      where.AND = effective.map((term) => ({ OR: fieldsFor(term) }));
     }
 
     if (propertyType) {
@@ -304,11 +336,19 @@ export class PropertiesService {
     const property = await this.prisma.property.findUnique({
       where: { id },
       include: {
+        // phone is here so a visitor looking at a listing can reach the host
+        // directly for anything the listing doesn't answer, same as the
+        // in-app voice call already does — this just gives them the number
+        // itself. Only findOne selects it: the endpoint behind property
+        // details, which already requires a signed-in account, not the
+        // public list or search, where it would go out to every browsing
+        // session at once.
         host: {
           select: {
             id: true,
             firstName: true,
             lastName: true,
+            phone: true,
             avatarUrl: true,
             hostRating: true,
             hostReviewCount: true,

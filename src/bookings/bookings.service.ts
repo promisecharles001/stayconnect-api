@@ -226,14 +226,21 @@ export class BookingsService {
 
   async findByHost(
     hostId: string,
-    options: { page: number; limit: number },
+    options: { page: number; limit: number; status?: BookingStatus },
   ): Promise<PaginatedResult<BookingResponseDto>> {
-    const { page, limit } = options;
+    const { page, limit, status } = options;
     const skip = PaginationUtil.calculateSkip({ page, limit });
+
+    // The status filter is what the "Booking Requests" screen relies on to
+    // show only what still needs a decision. It used to be dropped on the
+    // floor by the controller, so that screen listed every booking the host
+    // had ever received — including ones already accepted, which reappeared
+    // as fresh requests on every visit and could be accepted a second time.
+    const where = status ? { hostId, status } : { hostId };
 
     const [bookings, total] = await Promise.all([
       this.prisma.booking.findMany({
-        where: { hostId },
+        where,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
@@ -256,7 +263,7 @@ export class BookingsService {
           },
         },
       }),
-      this.prisma.booking.count({ where: { hostId } }),
+      this.prisma.booking.count({ where }),
     ]);
 
     // Convert Decimal values to numbers for the response

@@ -203,4 +203,39 @@ describe('BookingsService', () => {
       await expect(service.refundBooking('x', 'admin-1', {} as any)).rejects.toThrow(/Only HELD/i);
     });
   });
+
+  describe('findByHost — the Booking Requests list', () => {
+    beforeEach(() => {
+      prisma.booking.findMany.mockResolvedValue([]);
+      prisma.booking.count.mockResolvedValue(0);
+    });
+
+    it('filters by status when one is given', async () => {
+      // The app has always asked for status=PENDING. The controller dropped
+      // it, so this list returned every booking the host had ever received:
+      // accepted ones came back as fresh requests on the next visit and
+      // could be accepted a second time.
+      await service.findByHost('host-1', { page: 1, limit: 20, status: 'PENDING' as any });
+
+      expect(prisma.booking.findMany.mock.calls[0][0].where).toEqual({
+        hostId: 'host-1',
+        status: 'PENDING',
+      });
+    });
+
+    it('counts the same rows it lists, so pagination is not inflated', async () => {
+      await service.findByHost('host-1', { page: 1, limit: 20, status: 'PENDING' as any });
+
+      expect(prisma.booking.count.mock.calls[0][0].where).toEqual({
+        hostId: 'host-1',
+        status: 'PENDING',
+      });
+    });
+
+    it('returns every booking when no status is given', async () => {
+      await service.findByHost('host-1', { page: 1, limit: 20 });
+
+      expect(prisma.booking.findMany.mock.calls[0][0].where).toEqual({ hostId: 'host-1' });
+    });
+  });
 });
