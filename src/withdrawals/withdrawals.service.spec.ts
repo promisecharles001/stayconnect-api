@@ -122,7 +122,7 @@ describe('WithdrawalsService', () => {
       expect(earnings.refundWithdrawal).not.toHaveBeenCalled();
     });
 
-    it('refuses to process a request that is not pending', async () => {
+    it('refuses to pay a request that is already completed', async () => {
       prisma.withdrawalRequest.findUnique.mockResolvedValue({
         id: 'w-1',
         hostId: 'host-1',
@@ -133,7 +133,49 @@ describe('WithdrawalsService', () => {
       // Without this, paying the same request twice is one double-click away.
       await expect(
         service.processWithdrawal('w-1', 'admin-1', 'COMPLETED' as any),
-      ).rejects.toThrow(/not pending/i);
+      ).rejects.toThrow(/already .?COMPLETED/i);
+    });
+
+    it('allows the two-step payout: approve, then mark paid', async () => {
+      // Approving and marking paid both used to send COMPLETED, so the
+      // second action always failed with "not pending" and a host could
+      // never be recorded as paid.
+      prisma.withdrawalRequest.findUnique.mockResolvedValue({
+        id: 'w-1',
+        hostId: 'host-1',
+        amount: 10000,
+        status: 'PENDING',
+      });
+      await expect(
+        service.processWithdrawal('w-1', 'admin-1', 'PROCESSING' as any),
+      ).resolves.toBeDefined();
+
+      prisma.withdrawalRequest.findUnique.mockResolvedValue({
+        id: 'w-1',
+        hostId: 'host-1',
+        amount: 10000,
+        status: 'PROCESSING',
+      });
+      await expect(
+        service.processWithdrawal('w-1', 'admin-1', 'COMPLETED' as any, 'TRF-1'),
+      ).resolves.toBeDefined();
+
+      // Neither step credits anything back — the money is on its way out.
+      expect(earnings.refundWithdrawal).not.toHaveBeenCalled();
+    });
+
+    it('can still fail a withdrawal that is mid-processing', async () => {
+      prisma.withdrawalRequest.findUnique.mockResolvedValue({
+        id: 'w-1',
+        hostId: 'host-1',
+        amount: 10000,
+        status: 'PROCESSING',
+      });
+
+      await service.processWithdrawal('w-1', 'admin-1', 'FAILED' as any, undefined, 'bank rejected');
+
+      // A transfer that bounces after approval must still return the money.
+      expect(earnings.refundWithdrawal).toHaveBeenCalledWith('host-1', 10000, 'w-1');
     });
   });
 });

@@ -186,8 +186,27 @@ export class WithdrawalsService {
       throw new NotFoundException('Withdrawal request not found');
     }
 
-    if (withdrawal.status !== WithdrawalStatus.PENDING) {
-      throw new BadRequestException('Withdrawal request is not pending');
+    // A payout is two admin actions, not one: approve it (PROCESSING, "I
+    // accept this and am going to send the transfer"), then mark it paid
+    // (COMPLETED, "the money has left the account"). Only allowing
+    // transitions out of PENDING meant the second action always failed with
+    // "not pending", because approving had already moved it on.
+    const allowedFrom: Record<string, WithdrawalStatus[]> = {
+      [WithdrawalStatus.PROCESSING]: [WithdrawalStatus.PENDING],
+      [WithdrawalStatus.COMPLETED]: [WithdrawalStatus.PENDING, WithdrawalStatus.PROCESSING],
+      [WithdrawalStatus.FAILED]: [WithdrawalStatus.PENDING, WithdrawalStatus.PROCESSING],
+    };
+
+    const permitted = allowedFrom[status];
+    if (!permitted) {
+      throw new BadRequestException(
+        `A withdrawal cannot be moved to '${status}' from here.`,
+      );
+    }
+    if (!permitted.includes(withdrawal.status)) {
+      throw new BadRequestException(
+        `This withdrawal is already '${withdrawal.status}' and cannot be marked '${status}' again.`,
+      );
     }
 
     const updateData: any = {
