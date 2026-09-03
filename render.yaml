@@ -40,7 +40,7 @@ services:
       - key: DEFAULT_ADMIN_EMAIL
         value: stayconnectng@gmail.com
       - key: DEFAULT_ADMIN_PASSWORD
-        value: Mylove2u.
+        sync: false
       - key: ADMIN_EMAIL
         value: stayconnectng@gmail.com
       - key: SMTP_HOST
@@ -50,35 +50,35 @@ services:
       - key: SMTP_USER
         value: stayconnectng@gmail.com
       - key: SMTP_PASS
-        value: your-gmail-app-password
+        sync: false
       - key: APP_NAME
         value: StayConnect NG
       - key: CLOUDINARY_CLOUD_NAME
         value: da1rako6c
       - key: CLOUDINARY_API_KEY
-        value: 427477122634898
+        sync: false
       - key: CLOUDINARY_API_SECRET
-        value: ZTKmDWQCJN-s5P5V0ZVpjqFPXmc
+        sync: false
       - key: LIVEKIT_API_KEY
-        value: API3fmkDyaiP74M
+        sync: false
       - key: LIVEKIT_URL
         value: wss://stayconnect-grnkwxe8.livekit.cloud
       - key: LIVEKIT_PROJECT_ID
-        value: p_x3k379sp759
+        sync: false
       - key: LIVEKIT_SIP_URI
-        value: sip:x3k379sp759.sip.livekit.cloud
+        sync: false
       - key: LIVEKIT_TOKEN_EXPIRATION
         value: 3600
       - key: BANK_NAME
         value: Fidelity Bank
       - key: BANK_ACCOUNT_NUMBER
-        value: 5601704103
+        sync: false
       - key: BANK_ACCOUNT_NAME
         value: StayConnect Technologies
       - key: AGORA_APP_ID
-        value: 8e3680796123404cb8348727dfa8c665
+        sync: false
       - key: GOOGLE_MAPS_API_KEY
-        value: AIzaSyC6ZZztJuF0zvmFobROY5l0YjvpOmhNFKA
+        sync: false
       - key: EXPO_PUBLIC_API_URL
         value: https://stayconnect-ng-api.onrender.com/api/v1
 
