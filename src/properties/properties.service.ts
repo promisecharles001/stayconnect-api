@@ -349,6 +349,12 @@ export class PropertiesService {
             firstName: true,
             lastName: true,
             phone: true,
+            // The details screen has always rendered host.email and the
+            // Contact sheet offers an "Email host" option, but this select
+            // never returned it — so the email line rendered blank and the
+            // Contact option read "Email undefined" and opened
+            // mailto:undefined.
+            email: true,
             avatarUrl: true,
             hostRating: true,
             hostReviewCount: true,

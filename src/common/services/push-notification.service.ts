@@ -7,6 +7,14 @@ export interface PushNotificationPayload {
   title: string;
   body: string;
   data?: Record<string, unknown>;
+  /**
+   * 'high' asks Android to wake a dozing device and deliver immediately.
+   * Without it Expo sends normal FCM priority, which Android is free to
+   * batch until the phone next wakes up — fine for a new message, useless
+   * for an incoming call, where a notification that lands three minutes
+   * late is the same as one that never came.
+   */
+  priority?: 'default' | 'normal' | 'high';
 }
 
 /**
@@ -58,6 +66,7 @@ export class PushNotificationService {
           body: payload.body,
           data: payload.data || {},
           sound: 'default',
+          priority: payload.priority ?? 'default',
         }),
       });
 

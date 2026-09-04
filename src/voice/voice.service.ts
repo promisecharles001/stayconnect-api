@@ -262,6 +262,11 @@ export class VoiceService {
           title: `${identity} is calling`,
           body: `About ${contextTitle}`,
           data: { type: 'call', roomName, propertyId, bookingId, callerName: identity },
+          // A call is the one notification that is worthless if it arrives
+          // late — the caller is sitting there waiting right now. High
+          // priority asks Android to wake a dozing device rather than
+          // batching this until the phone next happens to wake up.
+          priority: 'high',
         })
         .catch((err) => this.logger.error(`Call push to ${calleeId} failed:`, err));
     }
