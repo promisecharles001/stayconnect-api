@@ -20,6 +20,7 @@ const model = () => ({
   delete: jest.fn(),
   deleteMany: jest.fn(),
   count: jest.fn(),
+  groupBy: jest.fn(),
 });
 
 export function createPrismaMock() {
@@ -32,7 +33,12 @@ export function createPrismaMock() {
     kYCVerification: model(),
     review: model(),
     conversation: model(),
+    message: model(),
     wishlistItem: model(),
+    // Array-style $transaction([...]) — the ops passed in are already the
+    // mock calls' own return values (promises), so running them through
+    // Promise.all resolves them in order exactly like the real one does.
+    $transaction: jest.fn((ops: unknown[]) => Promise.all(ops)),
   };
 }
 

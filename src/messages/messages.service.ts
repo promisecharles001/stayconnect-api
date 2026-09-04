@@ -214,17 +214,29 @@ export class MessagesService {
       throw new NotFoundException('Property not found');
     }
 
+    // sendMessage() redacts every message that follows — this is the one
+    // that did not, because it never called redactContactInfo at all. That
+    // makes it the single biggest hole in the whole feature: the opening
+    // message of a conversation is exactly where "Hi, is this available?
+    // Call me on 080..." tends to get typed, before either side has reason
+    // to hold back, and it was going straight into the database, the
+    // conversation list preview, and the chat screen untouched.
+    const initialMessage = dto.initialMessage
+      ? redactContactInfo(dto.initialMessage)
+      : null;
+
     // Create conversation with initial message if provided
     const conversation = await this.prisma.conversation.create({
       data: {
         propertyId: dto.propertyId,
         visitorId,
         hostId: dto.hostId,
-        messages: dto.initialMessage
+        messages: initialMessage
           ? {
               create: {
                 senderId: visitorId,
-                content: dto.initialMessage,
+                content: initialMessage.content,
+                containsRedactedContact: initialMessage.wasRedacted,
               },
             }
           : undefined,
@@ -278,6 +290,23 @@ export class MessagesService {
 
     // Let the host's conversation list pick up the new thread live.
     this.gateway.emitConversationUpdate([conversation.hostId], conversationDto);
+
+    // Same reasoning as sendMessage's push: the socket event above only
+    // reaches a host with the app open right now. Without this, a visitor's
+    // opening message — the one that actually gets a host's attention —
+    // went completely unnoticed until they next happened to open the app,
+    // while every message after the first one in the conversation did page
+    // them.
+    if (initialMessage) {
+      void this.pushNotificationService.sendToUser(dto.hostId, {
+        title: `New message from ${conversation.visitor.firstName} ${conversation.visitor.lastName}`,
+        body:
+          initialMessage.content.length > 100
+            ? `${initialMessage.content.slice(0, 100)}...`
+            : initialMessage.content,
+        data: { type: 'message', conversationId: conversation.id },
+      });
+    }
 
     return conversationDto;
   }
@@ -354,9 +383,15 @@ export class MessagesService {
       ? `${conversation.visitor.firstName} ${conversation.visitor.lastName}`
       : `${conversation.host.firstName} ${conversation.host.lastName}`;
 
+    // `content` here — not dto.content. redactContactInfo already ran above;
+    // using the raw dto.content put whatever phone number or email a message
+    // had just been redacted for in plain text on the recipient's lock
+    // screen, which is precisely what this feature exists to stop. The
+    // in-app message and the socket events were never affected — only this
+    // push body was reading the pre-redaction value.
     void this.pushNotificationService.sendToUser(recipientId, {
       title: `New message from ${senderName}`,
-      body: dto.content.length > 100 ? `${dto.content.slice(0, 100)}...` : dto.content,
+      body: content.length > 100 ? `${content.slice(0, 100)}...` : content,
       data: { type: 'message', conversationId: dto.conversationId },
     });
 
