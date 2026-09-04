@@ -14,6 +14,7 @@ export interface TokenGenerationParams {
   bookingId?: string;
   propertyId?: string;
   participantName?: string;
+  roomName?: string;
 }
 
 export interface GeneratedToken {
@@ -83,6 +84,26 @@ export class VoiceService {
    *  - propertyId — a visitor calling a host about a listing, before any
    *                 booking exists. The host of the property is the callee.
    *
+   * This same endpoint serves both starting a call and answering one — the
+   * app calls it a second time, as the other party, once the "is calling"
+   * push is tapped. `roomName` is how the request says which of those two
+   * it is: absent means "start a new call, derive the room, page the other
+   * side"; present means "join the room I was just handed, don't page
+   * anyone again."
+   *
+   * That distinction used to not exist, and it broke both directions:
+   *   - Property calls have no symmetric "other side" to derive from (the
+   *     room name embeds the *visitor's* id, which a host has no way to
+   *     reconstruct from their own). Without a way to hand the host that
+   *     room name, the "self-call" guard below rejected the host's own join
+   *     attempt outright — the caller ended up alone in a room believing
+   *     they were connected, because nothing ever told them the other side
+   *     had actually failed to join.
+   *   - Booking calls have a real participant on both sides, so answering
+   *     one used to succeed — but it re-ran the same code path as starting
+   *     a call, which re-fired an "X is calling" push at whoever was
+   *     already sitting in the room waiting.
+   *
    * Calls used to require a booking with verified payment. That gate was
    * removed deliberately: enquiring by phone before booking is the point.
    * Note this weakens the anti-circumvention posture that pairs with message
@@ -90,7 +111,7 @@ export class VoiceService {
    * moves through the platform.
    */
   async generateToken(params: TokenGenerationParams, userId: string): Promise<GeneratedToken> {
-    const { bookingId, propertyId, participantName } = params;
+    const { bookingId, propertyId, participantName, roomName: requestedRoomName } = params;
 
     if (!this.apiKey || !this.apiSecret || !this.serverUrl) {
       throw new Error('LiveKit credentials are not configured');
@@ -102,7 +123,8 @@ export class VoiceService {
 
     let roomName: string;
     let identity: string;
-    let calleeId: string;
+    // null means "this is an answer, not a call" — don't page anyone.
+    let calleeId: string | null;
     let contextTitle: string;
 
     if (bookingId) {
@@ -124,11 +146,16 @@ export class VoiceService {
         throw new ForbiddenException('You are not a participant in this booking');
       }
 
-      roomName = `booking-${bookingId}`;
+      const derivedRoomName = `booking-${bookingId}`;
+      if (requestedRoomName && requestedRoomName !== derivedRoomName) {
+        throw new ForbiddenException('That call is no longer valid.');
+      }
+
+      roomName = derivedRoomName;
       const isVisitor = booking.visitorId === userId;
       const person = isVisitor ? booking.visitor : booking.host;
       identity = participantName || `${person.firstName} ${person.lastName}`;
-      calleeId = isVisitor ? booking.hostId : booking.visitorId;
+      calleeId = requestedRoomName ? null : isVisitor ? booking.hostId : booking.visitorId;
       contextTitle = booking.property?.title ?? 'your booking';
     } else {
       const property = await this.prisma.property.findUnique({
@@ -140,23 +167,65 @@ export class VoiceService {
         throw new NotFoundException('Property not found');
       }
 
-      const caller = await this.prisma.user.findUnique({
-        where: { id: userId },
-        select: { firstName: true, lastName: true },
-      });
+      const isHost = property.hostId === userId;
 
-      // One room per (property, visitor) pair. When the host answers the
-      // push we send below, they are handed this same name, so both sides
-      // land in the same room without a booking to key off.
-      const visitorId = property.hostId === userId ? null : userId;
-      if (!visitorId) {
-        throw new ForbiddenException('You cannot call yourself about your own listing');
+      if (isHost) {
+        // The host never initiates a property call — there is no "call
+        // this visitor" button anywhere for a host — so getting here at
+        // all means they're answering one, which requires the room name
+        // from the push. Its "property-{propertyId}-{visitorId}" shape is
+        // parsed rather than trusted outright: it must genuinely be a room
+        // for *this* property, and the embedded id a real user, before the
+        // host is handed a token to join it.
+        const expectedPrefix = `property-${property.id}-`;
+        if (!requestedRoomName || !requestedRoomName.startsWith(expectedPrefix)) {
+          throw new ForbiddenException(
+            'No active call to answer for this property.',
+          );
+        }
+        const visitorId = requestedRoomName.slice(expectedPrefix.length);
+        const visitor = await this.prisma.user.findUnique({
+          where: { id: visitorId },
+          select: { id: true },
+        });
+        if (!visitor) {
+          throw new ForbiddenException('That call is no longer valid.');
+        }
+
+        const host = await this.prisma.user.findUnique({
+          where: { id: userId },
+          select: { firstName: true, lastName: true },
+        });
+
+        roomName = requestedRoomName;
+        identity =
+          participantName ||
+          `${host?.firstName ?? ''} ${host?.lastName ?? ''}`.trim() ||
+          'Host';
+        calleeId = null;
+        contextTitle = property.title;
+      } else {
+        // One room per (property, visitor) pair, keyed off the visitor's own
+        // id — this is always the initiating side for a property call, so
+        // there is no answering case to distinguish here.
+        const derivedRoomName = `property-${property.id}-${userId}`;
+        if (requestedRoomName && requestedRoomName !== derivedRoomName) {
+          throw new ForbiddenException('That call is no longer valid.');
+        }
+
+        const caller = await this.prisma.user.findUnique({
+          where: { id: userId },
+          select: { firstName: true, lastName: true },
+        });
+
+        roomName = derivedRoomName;
+        identity =
+          participantName ||
+          `${caller?.firstName ?? ''} ${caller?.lastName ?? ''}`.trim() ||
+          'Visitor';
+        calleeId = property.hostId;
+        contextTitle = property.title;
       }
-
-      roomName = `property-${property.id}-${visitorId}`;
-      identity = participantName || `${caller?.firstName ?? ''} ${caller?.lastName ?? ''}`.trim() || 'Visitor';
-      calleeId = property.hostId;
-      contextTitle = property.title;
     }
 
     const accessToken = new AccessToken(this.apiKey, this.apiSecret, {
@@ -177,20 +246,25 @@ export class VoiceService {
 
     this.logger.log(
       `LiveKit token issued — ${bookingId ? `booking: ${bookingId}` : `property: ${propertyId}`}, ` +
-        `caller: ${userId}, room: ${roomName}`,
+        `caller: ${userId}, room: ${roomName}, answering: ${!!requestedRoomName}`,
     );
 
     // Ring the other side. Without this the caller sits alone in a room the
     // callee has no way of knowing exists — there is no signalling channel
     // here beyond the push. Never let a failed push fail the call: the
-    // caller can still be joined by someone who opens the same room.
-    this.pushNotifications
-      .sendToUser(calleeId, {
-        title: `${identity} is calling`,
-        body: `About ${contextTitle}`,
-        data: { type: 'call', roomName, propertyId, bookingId, callerName: identity },
-      })
-      .catch((err) => this.logger.error(`Call push to ${calleeId} failed:`, err));
+    // caller can still be joined by someone who opens the same room. Skipped
+    // entirely when calleeId is null — that means this request is itself the
+    // answer to a call already in progress, and paging the person who is
+    // already sitting in the room waiting would be a bug, not a courtesy.
+    if (calleeId) {
+      this.pushNotifications
+        .sendToUser(calleeId, {
+          title: `${identity} is calling`,
+          body: `About ${contextTitle}`,
+          data: { type: 'call', roomName, propertyId, bookingId, callerName: identity },
+        })
+        .catch((err) => this.logger.error(`Call push to ${calleeId} failed:`, err));
+    }
 
     return {
       token,

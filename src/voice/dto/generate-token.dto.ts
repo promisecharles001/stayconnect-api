@@ -34,4 +34,19 @@ export class GenerateTokenDto {
   @IsString()
   @IsOptional()
   participantName?: string;
+
+  @ApiProperty({
+    example: 'booking-a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+    required: false,
+    description:
+      'Pass this when joining a call someone else already started — the ' +
+      'room name delivered in the "is calling" push notification. It marks ' +
+      'the request as answering rather than initiating, so a second ' +
+      '"is calling" push is not sent back to whoever is already waiting, ' +
+      'and it is what lets a host join a property call at all (see ' +
+      'VoiceService.generateToken for why). Omit it to start a new call.',
+  })
+  @IsString()
+  @IsOptional()
+  roomName?: string;
 }

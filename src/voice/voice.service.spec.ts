@@ -133,4 +133,99 @@ describe('VoiceService', () => {
       service.generateToken({ propertyId: 'property-1' }, 'visitor-1'),
     ).resolves.toHaveProperty('token');
   });
+
+  // A property call has no symmetric "other side" to derive a room from —
+  // the room name embeds the *visitor's* id, which a host has no way to
+  // reconstruct from their own. Before roomName existed as a way to hand the
+  // host the exact room the visitor opened, this was a hard rejection: the
+  // caller connected to an empty room and had no idea the callee's join had
+  // just failed outright.
+  describe('answering a property call', () => {
+    beforeEach(() => {
+      prisma.property.findUnique.mockResolvedValue(propertyRow());
+      prisma.user.findUnique.mockResolvedValue({ id: 'visitor-1', firstName: 'H', lastName: 'One' });
+    });
+
+    it('lets the host join using the room name from the push', async () => {
+      const result = await service.generateToken(
+        { propertyId: 'property-1', roomName: 'property-property-1-visitor-1' },
+        'host-1',
+      );
+
+      expect(result.roomName).toBe('property-property-1-visitor-1');
+    });
+
+    it('does not re-notify anyone when the host answers', async () => {
+      await service.generateToken(
+        { propertyId: 'property-1', roomName: 'property-property-1-visitor-1' },
+        'host-1',
+      );
+
+      expect(push.sendToUser).not.toHaveBeenCalled();
+    });
+
+    it('rejects a room name for a different property', async () => {
+      await expect(
+        service.generateToken(
+          { propertyId: 'property-1', roomName: 'property-some-other-property-visitor-1' },
+          'host-1',
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('rejects a room name whose visitor does not exist', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.generateToken(
+          { propertyId: 'property-1', roomName: 'property-property-1-nobody' },
+          'host-1',
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('still refuses a host with no room name at all', async () => {
+      // Unchanged from before roomName existed: a host with nothing to
+      // answer is not "starting" a call, since there is no such button —
+      // they simply have nothing to join.
+      await expect(
+        service.generateToken({ propertyId: 'property-1' }, 'host-1'),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  // Unlike property calls, either side of a booking can start a call — so
+  // before this distinction existed, whichever side answered by calling this
+  // same endpoint re-ran the "start a call" path and fired a second
+  // "is calling" push back at whoever was already sitting in the room
+  // waiting for them.
+  describe('answering a booking call', () => {
+    beforeEach(() => {
+      prisma.booking.findUnique.mockResolvedValue({
+        ...bookingRow({ paymentVerified: true }),
+        visitor: { firstName: 'V', lastName: 'One' },
+        host: { firstName: 'H', lastName: 'One' },
+        property: { title: 'Test Property' },
+      });
+    });
+
+    it('joins the same room without paging the other party again', async () => {
+      const result = await service.generateToken(
+        { bookingId: 'b-1', roomName: 'booking-b-1' },
+        'host-1',
+      );
+
+      expect(result.roomName).toBe('booking-b-1');
+      expect(push.sendToUser).not.toHaveBeenCalled();
+    });
+
+    it('rejects a room name for a different booking', async () => {
+      await expect(
+        service.generateToken(
+          { bookingId: 'b-1', roomName: 'booking-some-other-booking' },
+          'host-1',
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
 });
