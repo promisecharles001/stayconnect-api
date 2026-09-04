@@ -94,6 +94,99 @@ describe('PropertiesService', () => {
     });
   });
 
+  // The pin was set once at creation and never touched again on edit — a
+  // host correcting a typo'd address, or genuinely moving, left the map
+  // showing the property confidently in the wrong place. These run against
+  // their own module instance so GOOGLE_MAPS_API_KEY and global fetch can be
+  // controlled without affecting the shared `service` used everywhere else
+  // in this file.
+  describe('update — re-geocoding when the address changes', () => {
+    let geoService: PropertiesService;
+    let geoPrisma: PrismaMock;
+    let originalFetch: typeof fetch;
+
+    beforeEach(async () => {
+      geoPrisma = createPrismaMock();
+      geoPrisma.property.update.mockImplementation(({ data }: any) =>
+        Promise.resolve({ ...propertyRow(), ...data }),
+      );
+
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          PropertiesService,
+          { provide: PrismaService, useValue: geoPrisma },
+          {
+            provide: ConfigService,
+            useValue: { get: (key: string) => (key === 'GOOGLE_MAPS_API_KEY' ? 'test-key' : undefined) },
+          },
+          { provide: NotificationService, useValue: { notifyNewPropertySubmitted: jest.fn() } },
+        ],
+      }).compile();
+
+      geoService = moduleRef.get(PropertiesService);
+      originalFetch = global.fetch;
+    });
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    const mockGeocodeSuccess = (lat: number, lng: number) => {
+      global.fetch = jest.fn().mockResolvedValue({
+        json: () => Promise.resolve({ status: 'OK', results: [{ geometry: { location: { lat, lng } } }] }),
+      }) as any;
+    };
+
+    const mockGeocodeFailure = () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        json: () => Promise.resolve({ status: 'ZERO_RESULTS', results: [] }),
+      }) as any;
+    };
+
+    it('re-geocodes when the address changes', async () => {
+      geoPrisma.property.findUnique.mockResolvedValue(propertyRow());
+      mockGeocodeSuccess(6.6, 3.3);
+
+      await geoService.update('property-1', 'host-1', 'HOST', { address: '99 New Street' } as any);
+
+      const { data } = geoPrisma.property.update.mock.calls[0][0];
+      expect(data.latitude).toBe(6.6);
+      expect(data.longitude).toBe(3.3);
+    });
+
+    it('clears the pin instead of leaving a stale one when the new address fails to geocode', async () => {
+      geoPrisma.property.findUnique.mockResolvedValue(propertyRow({ latitude: 6.4281, longitude: 3.4219 }));
+      mockGeocodeFailure();
+
+      await geoService.update('property-1', 'host-1', 'HOST', { city: 'Somewhere Unmappable' } as any);
+
+      const { data } = geoPrisma.property.update.mock.calls[0][0];
+      expect(data.latitude).toBeNull();
+      expect(data.longitude).toBeNull();
+    });
+
+    it('does not re-geocode when the address is unchanged', async () => {
+      geoPrisma.property.findUnique.mockResolvedValue(propertyRow());
+      mockGeocodeSuccess(0, 0);
+
+      await geoService.update('property-1', 'host-1', 'HOST', { title: 'New title' } as any);
+
+      expect(global.fetch).not.toHaveBeenCalled();
+      const { data } = geoPrisma.property.update.mock.calls[0][0];
+      expect(data.latitude).toBeUndefined();
+      expect(data.longitude).toBeUndefined();
+    });
+
+    it('does not re-geocode when the new address is the same as the old one', async () => {
+      geoPrisma.property.findUnique.mockResolvedValue(propertyRow({ address: '12 Admiralty Way' }));
+      mockGeocodeSuccess(0, 0);
+
+      await geoService.update('property-1', 'host-1', 'HOST', { address: '12 Admiralty Way' } as any);
+
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+  });
+
   describe('setAvailability', () => {
     beforeEach(() => {
       prisma.property.update.mockImplementation(({ data }: any) =>

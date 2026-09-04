@@ -78,6 +78,11 @@ export function propertyRow(overrides: Record<string, any> = {}) {
     basePricePerNight: 25000,
     cleaningFee: null,
     averageRating: 0,
+    address: '12 Admiralty Way',
+    city: 'Lekki',
+    state: 'Lagos',
+    latitude: 6.4281,
+    longitude: 3.4219,
     ...overrides,
   };
 }

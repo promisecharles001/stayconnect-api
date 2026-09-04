@@ -457,9 +457,35 @@ export class PropertiesService {
       }
     }
 
+    // The pin is set once at creation and was never touched again — editing
+    // the address (fixing a typo, or an actual move) left latitude/longitude
+    // pointing at wherever the ORIGINAL text geocoded to. That is worse than
+    // having no pin: the property still shows up on the map, confidently, in
+    // the wrong place, with nothing telling the host or a visitor this
+    // happened. Only re-geocode when address/city/state actually changed —
+    // most edits (price, description, photos) don't touch location and
+    // shouldn't spend an API call on it.
+    const addressChanged =
+      (updatePropertyDto.address !== undefined && updatePropertyDto.address !== property.address) ||
+      (updatePropertyDto.city !== undefined && updatePropertyDto.city !== property.city) ||
+      (updatePropertyDto.state !== undefined && updatePropertyDto.state !== property.state);
+
+    let coordsUpdate: { latitude: number | null; longitude: number | null } | undefined;
+    if (addressChanged) {
+      const coords = await this.geocodeAddress(
+        updatePropertyDto.address ?? property.address,
+        updatePropertyDto.city ?? property.city,
+        updatePropertyDto.state ?? property.state,
+      );
+      // A failed geocode clears the pin rather than leaving the stale one —
+      // same reasoning as above, an admittedly-unknown location beats a
+      // confidently wrong one.
+      coordsUpdate = { latitude: coords?.lat ?? null, longitude: coords?.lng ?? null };
+    }
+
     const updatedProperty = await this.prisma.property.update({
       where: { id },
-      data: updatePropertyDto,
+      data: coordsUpdate ? { ...updatePropertyDto, ...coordsUpdate } : updatePropertyDto,
     });
 
     this.logger.log(`Property updated: ${updatedProperty.title}`);
