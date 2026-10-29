@@ -18,6 +18,8 @@ import { PrismaModule } from '../prisma/prisma.module';
   ],
   controllers: [MessagesController],
   providers: [MessagesService, MessagesGateway],
-  exports: [MessagesService],
+  // The gateway is exported so VoiceModule can ring a callee over the same
+  // authenticated socket the chat already uses.
+  exports: [MessagesService, MessagesGateway],
 })
 export class MessagesModule {}

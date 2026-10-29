@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
-import { PropertyStatus } from '@prisma/client';
+import { PropertyStatus, EscrowStatus } from '@prisma/client';
 import { NotificationService } from '../common/services/notification.service';
 import { PaginationUtil, PaginatedResult } from '../common/utils/pagination.util';
 import { CreatePropertyDto } from './dto/create-property.dto';
@@ -332,16 +332,17 @@ export class PropertiesService {
     return PaginationUtil.createResult(convertedProperties as PropertyResponseDto[], total, { page, limit });
   }
 
-  async findOne(id: string): Promise<PropertyResponseDto> {
+  async findOne(
+    id: string,
+    viewer?: { id: string; roleName?: string } | null,
+  ): Promise<PropertyResponseDto> {
     const property = await this.prisma.property.findUnique({
       where: { id },
       include: {
-        // phone is here so a visitor looking at a listing can reach the host
-        // directly for anything the listing doesn't answer, same as the
-        // in-app voice call already does — this just gives them the number
-        // itself. Only findOne selects it: the endpoint behind property
-        // details, which already requires a signed-in account, not the
-        // public list or search, where it would go out to every browsing
+        // phone and email are selected so they CAN be returned, but they are
+        // stripped below unless the viewer has earned them (see
+        // canSeeHostContact). Only findOne selects them at all — never the
+        // public list or search, where they would go out to every browsing
         // session at once.
         host: {
           select: {
@@ -368,6 +369,8 @@ export class PropertiesService {
       throw new NotFoundException(`Property with ID '${id}' not found`);
     }
 
+    const contactUnlocked = await this.canSeeHostContact(property.id, property.hostId, viewer);
+
     // Convert Decimal values to numbers for the response
     return {
       ...property,
@@ -375,13 +378,54 @@ export class PropertiesService {
       cleaningFee: property.cleaningFee ? Number(property.cleaningFee) : null,
       commissionPercent: Number(property.commissionPercent),
       averageRating: property.averageRating ?? 0,
+      // Tells the app WHY the number is missing, so it can say "shared after
+      // payment" instead of rendering nothing and looking broken.
+      contactUnlocked,
       host: {
         ...property.host,
+        // Withheld, not blanked: the keys are removed outright so a client
+        // that forgets to check contactUnlocked still has nothing to show.
+        ...(contactUnlocked ? {} : { phone: undefined, email: undefined }),
         hostRating: property.host.hostRating ?? 0,
         hostReviewCount: property.host.hostReviewCount ?? 0,
         hostSince: property.host.hostSince,
       },
     } as unknown as PropertyResponseDto;
+  }
+
+  /**
+   * Whether this viewer may see the host's phone number and email.
+   *
+   * The platform earns its commission on bookings, and a number handed over
+   * before any money moves is an invitation to arrange the stay privately —
+   * the same reason chat redacts contact details. So the host's contact
+   * details unlock when the viewer has a booking on this listing whose
+   * payment an admin has verified. Proof merely being uploaded does not
+   * count: anyone can attach any image.
+   *
+   * The host and admins always see it. A refunded booking does not keep the
+   * number unlocked — the visitor no longer has a stay to coordinate.
+   */
+  private async canSeeHostContact(
+    propertyId: string,
+    hostId: string,
+    viewer?: { id: string; roleName?: string } | null,
+  ): Promise<boolean> {
+    if (!viewer?.id) return false;
+    if (viewer.id === hostId) return true;
+    if (viewer.roleName === 'ADMIN') return true;
+
+    const paid = await this.prisma.booking.findFirst({
+      where: {
+        propertyId,
+        visitorId: viewer.id,
+        paymentVerified: true,
+        escrowStatus: { not: EscrowStatus.REFUNDED },
+      },
+      select: { id: true },
+    });
+
+    return !!paid;
   }
 
   /**

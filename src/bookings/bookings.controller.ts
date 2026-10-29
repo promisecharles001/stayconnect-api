@@ -96,8 +96,12 @@ export class BookingsController {
   @Get(':id')
   @ApiOperation({ summary: 'Get booking by ID' })
   @ApiParam({ name: 'id', description: 'Booking ID', type: 'string' })
-  async findOne(@Param('id', ParseUUIDPipe) id: string): Promise<BookingResponseDto> {
-    return this.bookingsService.findOne(id);
+  async findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: Role,
+  ): Promise<BookingResponseDto> {
+    return this.bookingsService.findOne(id, { id: userId, roleName: userRole?.name });
   }
 
   @Patch(':id/status')

@@ -145,4 +145,19 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
       this.server.to(`user:${userId}`).emit('conversation_update', conversation);
     }
   }
+
+  /**
+   * Send one event to one user's personal room — every device they have the
+   * app open on. Used for incoming-call signalling, which cannot depend on a
+   * push notification alone: push needs Firebase configured in the build and
+   * valid credentials at Expo, and either missing means a call never rings.
+   * The socket is already open whenever the app is, so it needs neither.
+   *
+   * Safe to call when nobody is connected — emitting to an empty room is a
+   * no-op, which is exactly what should happen for an offline user (the push
+   * is the fallback for them).
+   */
+  emitToUser(userId: string, event: string, payload: unknown): void {
+    this.server?.to(`user:${userId}`).emit(event, payload);
+  }
 }

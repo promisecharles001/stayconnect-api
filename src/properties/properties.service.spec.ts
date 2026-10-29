@@ -187,6 +187,97 @@ describe('PropertiesService', () => {
     });
   });
 
+  // The host's phone and email decide whether a stay gets arranged privately
+  // instead of through the platform that earns its commission on it. They
+  // were briefly returned to every signed-in visitor on the property page;
+  // this is the rule that puts them back behind a verified payment.
+  describe('findOne — host contact is hidden until payment is verified', () => {
+    const hostRow = {
+      id: 'host-1',
+      firstName: 'Hank',
+      lastName: 'Host',
+      phone: '+2348012345678',
+      email: 'hank@example.com',
+      avatarUrl: null,
+      hostRating: 0,
+      hostReviewCount: 0,
+      hostSince: null,
+    };
+
+    beforeEach(() => {
+      prisma.property.findUnique.mockResolvedValue({
+        ...propertyRow(),
+        basePricePerNight: 25000,
+        cleaningFee: null,
+        commissionPercent: 10,
+        averageRating: 0,
+        host: hostRow,
+      });
+    });
+
+    it('withholds phone and email from an anonymous viewer', async () => {
+      const result: any = await service.findOne('property-1', null);
+
+      expect(result.contactUnlocked).toBe(false);
+      // What matters is the wire shape, not the in-memory object: after JSON
+      // serialisation the keys must be gone entirely, so a client that
+      // forgets to check contactUnlocked still has nothing to display.
+      const onTheWire = JSON.parse(JSON.stringify(result.host));
+      expect(onTheWire).not.toHaveProperty('phone');
+      expect(onTheWire).not.toHaveProperty('email');
+    });
+
+    it('withholds them from a visitor who has not paid', async () => {
+      prisma.booking.findFirst.mockResolvedValue(null);
+
+      const result: any = await service.findOne('property-1', { id: 'visitor-1', roleName: 'VISITOR' });
+
+      expect(result.contactUnlocked).toBe(false);
+      expect(result.host.phone).toBeUndefined();
+      expect(result.host.email).toBeUndefined();
+    });
+
+    it('unlocks them once the visitor has a verified, un-refunded payment on this listing', async () => {
+      prisma.booking.findFirst.mockResolvedValue({ id: 'booking-1' });
+
+      const result: any = await service.findOne('property-1', { id: 'visitor-1', roleName: 'VISITOR' });
+
+      expect(result.contactUnlocked).toBe(true);
+      expect(result.host.phone).toBe('+2348012345678');
+      expect(result.host.email).toBe('hank@example.com');
+    });
+
+    it('only counts a payment that an admin verified, and that was not refunded', async () => {
+      prisma.booking.findFirst.mockResolvedValue(null);
+
+      await service.findOne('property-1', { id: 'visitor-1', roleName: 'VISITOR' });
+
+      // Uploading proof is not enough — anyone can attach any image — and a
+      // refunded booking no longer has a stay to coordinate.
+      expect(prisma.booking.findFirst.mock.calls[0][0].where).toMatchObject({
+        propertyId: 'property-1',
+        visitorId: 'visitor-1',
+        paymentVerified: true,
+        escrowStatus: { not: 'REFUNDED' },
+      });
+    });
+
+    it('always shows the host their own details, without a booking lookup', async () => {
+      const result: any = await service.findOne('property-1', { id: 'host-1', roleName: 'HOST' });
+
+      expect(result.contactUnlocked).toBe(true);
+      expect(result.host.phone).toBe('+2348012345678');
+      expect(prisma.booking.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('always shows an admin, without a booking lookup', async () => {
+      const result: any = await service.findOne('property-1', { id: 'admin-1', roleName: 'ADMIN' });
+
+      expect(result.contactUnlocked).toBe(true);
+      expect(prisma.booking.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
   describe('setAvailability', () => {
     beforeEach(() => {
       prisma.property.update.mockImplementation(({ data }: any) =>

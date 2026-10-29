@@ -214,8 +214,10 @@ export class BookingsService {
         totalAmount: Number(booking.totalAmount),
         commissionAmount: Number(booking.commissionAmount),
       };
-      // Remove host info if payment is not verified
-      if (!booking.paymentVerified) {
+      // Remove host info until the payment is verified (and stays removed if
+      // the booking is later refunded — the visitor no longer has a stay to
+      // coordinate, so the number goes back behind the gate).
+      if (!BookingsService.hostContactUnlocked(booking)) {
         delete (baseBooking as any).host;
       }
       return baseBooking;
@@ -344,7 +346,22 @@ export class BookingsService {
     return PaginationUtil.createResult(convertedBookings as BookingResponseDto[], total, { page, limit });
   }
 
-  async findOne(id: string): Promise<BookingResponseDto> {
+  /**
+   * The one rule for when a visitor may see the host's phone and email on a
+   * booking: an admin has verified the payment, and it hasn't been refunded.
+   * Proof being uploaded is not enough — anyone can attach any image.
+   */
+  private static hostContactUnlocked(booking: {
+    paymentVerified: boolean;
+    escrowStatus?: EscrowStatus | string | null;
+  }): boolean {
+    return booking.paymentVerified && booking.escrowStatus !== EscrowStatus.REFUNDED;
+  }
+
+  async findOne(
+    id: string,
+    viewer?: { id: string; roleName?: string },
+  ): Promise<BookingResponseDto> {
     const booking = await this.prisma.booking.findUnique({
       where: { id },
       include: {
@@ -371,14 +388,28 @@ export class BookingsService {
       throw new NotFoundException(`Booking with ID '${id}' not found`);
     }
 
-    // Convert Decimal values to numbers for the response, and only include host if payment is verified
+    // This route used to take nothing but an id: any signed-in user holding
+    // a booking's UUID could read it — amounts, payment-proof URL, and, once
+    // the booking was paid, the host's phone and email. That made the
+    // "hide contact until paid" rule only as strong as the secrecy of a UUID,
+    // and UUIDs leak (push payloads, shared screenshots, logs). Only the two
+    // parties to the booking, and admins, may read it. 404 rather than 403 so
+    // the route doesn't confirm that someone else's booking id exists.
+    const isParty = viewer?.id === booking.visitorId || viewer?.id === booking.hostId;
+    const isAdmin = viewer?.roleName === 'ADMIN';
+    if (!isParty && !isAdmin) {
+      throw new NotFoundException(`Booking with ID '${id}' not found`);
+    }
+
+    // Convert Decimal values to numbers for the response
     const baseBooking = {
       ...booking,
       totalAmount: Number(booking.totalAmount),
       commissionAmount: Number(booking.commissionAmount),
     };
-    // Remove host info if payment is not verified
-    if (!booking.paymentVerified) {
+    // The host sees their own details regardless; a visitor only once the
+    // payment is verified.
+    if (viewer?.id !== booking.hostId && !isAdmin && !BookingsService.hostContactUnlocked(booking)) {
       delete (baseBooking as any).host;
     }
     return baseBooking as unknown as BookingResponseDto;

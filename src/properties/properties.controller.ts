@@ -81,8 +81,17 @@ export class PropertiesController {
     description: 'Property found',
     type: PropertyResponseDto,
   })
-  async findOne(@Param('id', ParseUUIDPipe) id: string): Promise<PropertyResponseDto> {
-    return this.propertiesService.findOne(id);
+  async findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: { id: string; role?: Role } | null,
+  ): Promise<PropertyResponseDto> {
+    // The viewer decides whether the host's phone and email come back — they
+    // unlock only for the host, an admin, or a visitor whose booking on this
+    // listing has a verified payment.
+    return this.propertiesService.findOne(
+      id,
+      user ? { id: user.id, roleName: user.role?.name } : null,
+    );
   }
 
   @Patch(':id')

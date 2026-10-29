@@ -2,6 +2,7 @@ import { Controller, Post, Body, HttpCode, HttpStatus, Request } from '@nestjs/c
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { VoiceService } from './voice.service';
 import { GenerateTokenDto } from './dto/generate-token.dto';
+import { SignalCallDto } from './dto/signal-call.dto';
 import { TokenResponseDto } from './dto/token-response.dto';
 import { UnauthorizedException } from '@nestjs/common';
 
@@ -41,6 +42,23 @@ export class VoiceController {
     }
     
     return this.voiceService.generateToken(generateTokenDto, userId);
+  }
+
+  @Post('signal')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Tell the other party a call was declined or abandoned',
+    description:
+      'Lets a callee decline an incoming call, or a caller cancel one nobody answered. ' +
+      'Cancelling also sends the callee a "missed call" notification.',
+  })
+  @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Not a party to that call' })
+  async signal(@Request() req: any, @Body() dto: SignalCallDto): Promise<{ ok: true }> {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+    return this.voiceService.signalCall(userId, dto);
   }
 
   @Post('config-status')

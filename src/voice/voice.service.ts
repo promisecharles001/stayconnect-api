@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { AccessToken, RoomServiceClient, CreateOptions } from 'livekit-server-sdk';
 import { PrismaService } from '../prisma/prisma.service';
 import { PushNotificationService } from '../common/services/push-notification.service';
+import { MessagesGateway } from '../messages/messages.gateway';
 
 export interface TokenGenerationParams {
   bookingId?: string;
@@ -37,6 +38,7 @@ export class VoiceService {
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
     private readonly pushNotifications: PushNotificationService,
+    private readonly gateway: MessagesGateway,
   ) {
     this.apiKey = this.configService.get<string>('LIVEKIT_API_KEY') || '';
     this.apiSecret = this.configService.get<string>('LIVEKIT_API_SECRET') || '';
@@ -257,6 +259,21 @@ export class VoiceService {
     // answer to a call already in progress, and paging the person who is
     // already sitting in the room waiting would be a bug, not a courtesy.
     if (calleeId) {
+      // Ring over the live socket first. Push only reaches a phone that has
+      // Firebase configured in its build and valid credentials at Expo — and
+      // until recently the Android build had neither, so no call ever rang.
+      // The socket is open whenever the app is, needs neither, and arrives
+      // instantly. The push below remains the path for a closed app.
+      this.gateway.emitToUser(calleeId, 'incoming_call', {
+        roomName,
+        bookingId,
+        propertyId,
+        callerId: userId,
+        callerName: identity,
+        contextTitle,
+        startedAt: new Date().toISOString(),
+      });
+
       this.pushNotifications
         .sendToUser(calleeId, {
           title: `${identity} is calling`,
@@ -277,6 +294,84 @@ export class VoiceService {
       serverUrl: this.serverUrl,
       expiresIn: this.tokenExpiration,
     };
+  }
+
+  /**
+   * Tell the other party that a call was declined or abandoned.
+   *
+   * Without this the caller only ever sees "ringing": a callee who tapped
+   * Decline left them waiting on a screen that would never change, and a
+   * caller who hung up left the callee's incoming-call screen up with nobody
+   * on the other end.
+   *
+   * The two parties are re-derived from the booking or property the call is
+   * about, and the requester must be one of them — otherwise anyone could
+   * push "declined" into a stranger's call, or trigger "missed call"
+   * notifications at people they have no business with.
+   */
+  async signalCall(
+    userId: string,
+    params: { roomName: string; bookingId?: string; propertyId?: string; action: 'declined' | 'cancelled' },
+  ): Promise<{ ok: true }> {
+    const { roomName, bookingId, propertyId, action } = params;
+
+    const parties = await this.partiesForRoom(roomName, bookingId, propertyId);
+    if (!parties || (userId !== parties.visitorId && userId !== parties.hostId)) {
+      throw new ForbiddenException('That call is no longer valid.');
+    }
+
+    const otherId = userId === parties.visitorId ? parties.hostId : parties.visitorId;
+    const me = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { firstName: true, lastName: true },
+    });
+    const name = `${me?.firstName ?? ''} ${me?.lastName ?? ''}`.trim() || 'Someone';
+
+    this.gateway.emitToUser(otherId, 'call_ended', { roomName, action, byName: name });
+
+    // The caller giving up before anyone answered is a missed call — the one
+    // case where the callee has nothing on screen to show for it. A decline
+    // needs no notification: the person declining was there.
+    if (action === 'cancelled') {
+      this.pushNotifications
+        .sendToUser(otherId, {
+          title: 'Missed call',
+          body: `${name} tried to call you`,
+          data: { type: 'missed_call', roomName, propertyId, bookingId },
+        })
+        .catch((err) => this.logger.error(`Missed-call push to ${otherId} failed:`, err));
+    }
+
+    return { ok: true };
+  }
+
+  private async partiesForRoom(
+    roomName: string,
+    bookingId?: string,
+    propertyId?: string,
+  ): Promise<{ visitorId: string; hostId: string } | null> {
+    if (bookingId) {
+      if (roomName !== `booking-${bookingId}`) return null;
+      const booking = await this.prisma.booking.findUnique({
+        where: { id: bookingId },
+        select: { visitorId: true, hostId: true },
+      });
+      return booking ?? null;
+    }
+
+    if (propertyId) {
+      const prefix = `property-${propertyId}-`;
+      if (!roomName.startsWith(prefix)) return null;
+      const visitorId = roomName.slice(prefix.length);
+      if (!visitorId) return null;
+      const property = await this.prisma.property.findUnique({
+        where: { id: propertyId },
+        select: { hostId: true },
+      });
+      return property ? { visitorId, hostId: property.hostId } : null;
+    }
+
+    return null;
   }
 
   /**

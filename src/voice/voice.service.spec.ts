@@ -4,6 +4,7 @@ import { ForbiddenException, NotFoundException, BadRequestException } from '@nes
 import { VoiceService } from './voice.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PushNotificationService } from '../common/services/push-notification.service';
+import { MessagesGateway } from '../messages/messages.gateway';
 import { createPrismaMock, PrismaMock, bookingRow, propertyRow } from '../test-support/prisma-mock';
 
 /**
@@ -16,10 +17,12 @@ describe('VoiceService', () => {
   let service: VoiceService;
   let prisma: PrismaMock;
   let push: { sendToUser: jest.Mock };
+  let gateway: { emitToUser: jest.Mock };
 
   beforeEach(async () => {
     prisma = createPrismaMock();
     push = { sendToUser: jest.fn().mockResolvedValue(undefined) };
+    gateway = { emitToUser: jest.fn() };
 
     const config: Record<string, string> = {
       LIVEKIT_API_KEY: 'devkey',
@@ -34,6 +37,7 @@ describe('VoiceService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: ConfigService, useValue: { get: (k: string) => config[k] } },
         { provide: PushNotificationService, useValue: push },
+        { provide: MessagesGateway, useValue: gateway },
       ],
     }).compile();
 
@@ -190,6 +194,128 @@ describe('VoiceService', () => {
       // they simply have nothing to join.
       await expect(
         service.generateToken({ propertyId: 'property-1' }, 'host-1'),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  // Push alone left calls dead in practice: it needs Firebase compiled into
+  // the Android build and credentials at Expo, and the shipped build had
+  // neither — no phone ever got a token, so no call ever rang. The socket is
+  // open whenever the app is and needs neither.
+  describe('ringing over the live socket', () => {
+    it('rings the host the moment a visitor starts a property call', async () => {
+      prisma.property.findUnique.mockResolvedValue(propertyRow());
+      prisma.user.findUnique.mockResolvedValue({ firstName: 'V', lastName: 'One' });
+
+      await service.generateToken({ propertyId: 'property-1' }, 'visitor-1');
+
+      expect(gateway.emitToUser).toHaveBeenCalledWith(
+        'host-1',
+        'incoming_call',
+        expect.objectContaining({
+          roomName: 'property-property-1-visitor-1',
+          propertyId: 'property-1',
+          callerId: 'visitor-1',
+          callerName: 'V One',
+        }),
+      );
+    });
+
+    it('does not ring anyone when the host is merely answering', async () => {
+      prisma.property.findUnique.mockResolvedValue(propertyRow());
+      prisma.user.findUnique.mockResolvedValue({ id: 'visitor-1', firstName: 'H', lastName: 'One' });
+
+      await service.generateToken(
+        { propertyId: 'property-1', roomName: 'property-property-1-visitor-1' },
+        'host-1',
+      );
+
+      expect(gateway.emitToUser).not.toHaveBeenCalled();
+    });
+
+    it('still pushes, for a callee whose app is closed', async () => {
+      prisma.property.findUnique.mockResolvedValue(propertyRow());
+      prisma.user.findUnique.mockResolvedValue({ firstName: 'V', lastName: 'One' });
+
+      await service.generateToken({ propertyId: 'property-1' }, 'visitor-1');
+
+      expect(push.sendToUser).toHaveBeenCalledWith(
+        'host-1',
+        expect.objectContaining({ priority: 'high' }),
+      );
+    });
+  });
+
+  // Without this the caller only ever sees "ringing": a callee who tapped
+  // Decline left them waiting on a screen that would never change.
+  describe('declining and cancelling a call', () => {
+    beforeEach(() => {
+      prisma.property.findUnique.mockResolvedValue(propertyRow());
+      prisma.user.findUnique.mockResolvedValue({ firstName: 'Pat', lastName: 'Person' });
+    });
+
+    const room = 'property-property-1-visitor-1';
+
+    it('tells the caller when the host declines', async () => {
+      await service.signalCall('host-1', { roomName: room, propertyId: 'property-1', action: 'declined' });
+
+      expect(gateway.emitToUser).toHaveBeenCalledWith(
+        'visitor-1',
+        'call_ended',
+        expect.objectContaining({ action: 'declined', roomName: room }),
+      );
+    });
+
+    it('does not send a missed-call notification for a decline', async () => {
+      await service.signalCall('host-1', { roomName: room, propertyId: 'property-1', action: 'declined' });
+
+      expect(push.sendToUser).not.toHaveBeenCalled();
+    });
+
+    it('tells the host, and notifies them of a missed call, when the caller gives up', async () => {
+      await service.signalCall('visitor-1', { roomName: room, propertyId: 'property-1', action: 'cancelled' });
+
+      expect(gateway.emitToUser).toHaveBeenCalledWith(
+        'host-1',
+        'call_ended',
+        expect.objectContaining({ action: 'cancelled' }),
+      );
+      expect(push.sendToUser).toHaveBeenCalledWith(
+        'host-1',
+        expect.objectContaining({ title: 'Missed call' }),
+      );
+    });
+
+    it('refuses someone who is not a party to the call', async () => {
+      await expect(
+        service.signalCall('a-stranger', { roomName: room, propertyId: 'property-1', action: 'cancelled' }),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(gateway.emitToUser).not.toHaveBeenCalled();
+      expect(push.sendToUser).not.toHaveBeenCalled();
+    });
+
+    it('refuses a room name that does not belong to the property it claims', async () => {
+      await expect(
+        service.signalCall('host-1', {
+          roomName: 'property-some-other-property-visitor-1',
+          propertyId: 'property-1',
+          action: 'declined',
+        }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('works for booking calls too', async () => {
+      prisma.booking.findUnique.mockResolvedValue(bookingRow());
+
+      await service.signalCall('host-1', { roomName: 'booking-b-1', bookingId: 'b-1', action: 'declined' });
+
+      expect(gateway.emitToUser).toHaveBeenCalledWith('visitor-1', 'call_ended', expect.anything());
+    });
+
+    it('refuses when neither a booking nor a property is named', async () => {
+      await expect(
+        service.signalCall('host-1', { roomName: room, action: 'declined' }),
       ).rejects.toThrow(ForbiddenException);
     });
   });

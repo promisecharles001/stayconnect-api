@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { BookingsService } from './bookings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PushNotificationService } from '../common/services/push-notification.service';
@@ -201,6 +201,70 @@ describe('BookingsService', () => {
       prisma.booking.findUnique.mockResolvedValue(bookingRow({ escrowStatus: 'RELEASED' }));
 
       await expect(service.refundBooking('x', 'admin-1', {} as any)).rejects.toThrow(/Only HELD/i);
+    });
+  });
+
+  // GET /bookings/:id used to take nothing but an id. Any signed-in user
+  // holding a booking's UUID could read it — and once it was paid, the host's
+  // phone and email with it — so "hidden until paid" was only as strong as the
+  // secrecy of a UUID.
+  describe('findOne — who may read a booking, and what the visitor sees', () => {
+    const withHost = (overrides: Record<string, any> = {}) => ({
+      ...bookingRow(overrides),
+      property: { id: 'property-1', title: 'Test Property', images: [] },
+      host: { id: 'host-1', firstName: 'Hank', lastName: 'Host', email: 'h@example.com', phone: '+2348012345678' },
+    });
+
+    it('refuses a signed-in stranger — and does not confirm the booking exists', async () => {
+      prisma.booking.findUnique.mockResolvedValue(withHost({ paymentVerified: true }));
+
+      await expect(
+        service.findOne('b-1', { id: 'a-stranger', roleName: 'VISITOR' }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('refuses a caller who supplies no viewer at all', async () => {
+      prisma.booking.findUnique.mockResolvedValue(withHost({ paymentVerified: true }));
+
+      await expect(service.findOne('b-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('hides the host from the visitor until payment is verified', async () => {
+      prisma.booking.findUnique.mockResolvedValue(withHost({ paymentVerified: false }));
+
+      const result: any = await service.findOne('b-1', { id: 'visitor-1', roleName: 'VISITOR' });
+
+      expect(result.host).toBeUndefined();
+    });
+
+    it('shows the host to the visitor once payment is verified', async () => {
+      prisma.booking.findUnique.mockResolvedValue(
+        withHost({ paymentVerified: true, escrowStatus: 'HELD' }),
+      );
+
+      const result: any = await service.findOne('b-1', { id: 'visitor-1', roleName: 'VISITOR' });
+
+      expect(result.host.phone).toBe('+2348012345678');
+    });
+
+    it('takes the number back if the booking is refunded', async () => {
+      prisma.booking.findUnique.mockResolvedValue(
+        withHost({ paymentVerified: true, escrowStatus: 'REFUNDED' }),
+      );
+
+      const result: any = await service.findOne('b-1', { id: 'visitor-1', roleName: 'VISITOR' });
+
+      expect(result.host).toBeUndefined();
+    });
+
+    it('always shows the host their own record, and lets an admin read any booking', async () => {
+      prisma.booking.findUnique.mockResolvedValue(withHost({ paymentVerified: false }));
+
+      const asHost: any = await service.findOne('b-1', { id: 'host-1', roleName: 'HOST' });
+      const asAdmin: any = await service.findOne('b-1', { id: 'admin-1', roleName: 'ADMIN' });
+
+      expect(asHost.host.phone).toBe('+2348012345678');
+      expect(asAdmin.host.phone).toBe('+2348012345678');
     });
   });
 
