@@ -39,3 +39,27 @@ export const USER_SAFE_SELECT = {
   pushToken: true,
   role: true,
 } satisfies Prisma.UserSelect;
+
+/**
+ * What one user may see about ANOTHER user: a public profile only.
+ *
+ * Email, phone and push token are deliberately absent. Host ids are public
+ * (they appear on every property listing), so returning the full safe
+ * select here let any signed-in visitor read a host's phone number without
+ * paying — bypassing the rule that host contact stays hidden until payment
+ * is verified. The user themself and admins still get USER_SAFE_SELECT.
+ */
+export const USER_PUBLIC_SELECT = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  avatarUrl: true,
+  createdAt: true,
+  hostSince: true,
+  hostBio: true,
+  hostRating: true,
+  hostReviewCount: true,
+  visitorRating: true,
+  visitorReviewCount: true,
+  role: { select: { name: true } },
+} satisfies Prisma.UserSelect;

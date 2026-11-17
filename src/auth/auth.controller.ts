@@ -10,6 +10,7 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { Throttle } from '@nestjs/throttler';
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RegisterDto } from './dto/register.dto';
@@ -30,6 +31,8 @@ import {
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  // Per IP per minute. Slows mass account creation.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Public()
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
@@ -51,6 +54,8 @@ export class AuthController {
     return this.authService.register(registerDto);
   }
 
+  // Per IP per minute. Slows password guessing.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
@@ -68,6 +73,8 @@ export class AuthController {
     return this.authService.login(loginDto);
   }
 
+  // Per IP per minute.
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
@@ -130,6 +137,8 @@ export class AuthController {
     return this.authService.changePassword(userId, changePasswordDto);
   }
 
+  // Per IP per minute. Stops reset-email flooding.
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Public()
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
@@ -145,6 +154,8 @@ export class AuthController {
     return this.authService.forgotPassword(forgotPasswordDto);
   }
 
+  // Per IP per minute. Slows reset-token guessing.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Public()
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)

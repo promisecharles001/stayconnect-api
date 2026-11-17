@@ -7,6 +7,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { CloudinaryService } from '../services/cloudinary.service';
 
 // Folders this endpoint is allowed to upload into. Keep this an allowlist
@@ -31,6 +32,8 @@ const ALLOWED_FOLDERS: Record<string, string> = {
 export class UploadController {
   constructor(private readonly cloudinaryService: CloudinaryService) {}
 
+  // Per IP per minute. Each call costs Cloudinary quota.
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post('images')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Upload base64 images to Cloudinary' })

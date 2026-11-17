@@ -52,14 +52,14 @@ describe('BookingsService', () => {
     it('takes commission at the property rate', async () => {
       await service.create('visitor-1', {
         propertyId: 'property-1',
-        totalAmount: 90000,
         ...futureDates,
       } as any);
 
       const { data } = prisma.booking.create.mock.calls[0][0];
-      // 10% of 90,000. A host is owed the remainder, so this number leaving
-      // the service wrong means somebody is paid the wrong amount.
-      expect(data.commissionAmount).toBe(9000);
+      // 2 nights x ₦25,000 = ₦50,000 (priced on the server); 10% of that.
+      // A host is owed the remainder, so this number leaving the service
+      // wrong means somebody is paid the wrong amount.
+      expect(data.commissionAmount).toBe(5000);
     });
 
     it('stores a transfer reference derived from the booking id', async () => {

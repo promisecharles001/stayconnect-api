@@ -80,7 +80,8 @@ export class BookingsService {
   }
 
   async create(visitorId: string, createBookingDto: CreateBookingDto): Promise<BookingResponseDto> {
-    const { propertyId, startDate, endDate, totalAmount } = createBookingDto;
+    // totalAmount from the client is deliberately not read — see below.
+    const { propertyId, startDate, endDate } = createBookingDto;
 
     // Check if property exists and is approved
     const property = await this.prisma.property.findUnique({
@@ -132,6 +133,20 @@ export class BookingsService {
         'This property is already booked (or has a pending request) for some of the selected dates. Please choose different dates.',
       );
     }
+
+    // Price the stay on the server. The client used to send totalAmount and
+    // it was stored as-is, so a visitor could book any property for ₦1 —
+    // unlocking host contact once verified, and corrupting the host payout
+    // and commission. Nights are calendar days between the two dates (the
+    // app sends plain YYYY-MM-DD), so stray time-of-day parts can't add or
+    // drop a night. For whole-day dates this equals the app's own count.
+    const toUtcDay = (d: Date) =>
+      Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    const nights = Math.round((toUtcDay(end) - toUtcDay(start)) / 86_400_000);
+    if (nights < 1) {
+      throw new BadRequestException('A booking must be for at least one night');
+    }
+    const totalAmount = Number(property.basePricePerNight) * nights;
 
     // Calculate commission (based on property's commission percent)
     const commissionAmount = (totalAmount * Number(property.commissionPercent)) / 100;

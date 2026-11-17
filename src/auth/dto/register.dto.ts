@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsPhoneNumber,
   IsEnum,
+  IsIn,
 } from 'class-validator';
 import { UserStatus } from '@prisma/client';
 
@@ -53,13 +54,16 @@ export class RegisterDto {
   @IsEnum(UserStatus, { message: 'Invalid user status' })
   status?: UserStatus;
 
-  @ApiProperty({ 
-    example: 'VISITOR', 
-    description: 'User role', 
-    enum: ['ADMIN', 'HOST', 'VISITOR'],
-    required: false 
+  // ADMIN is deliberately not accepted here. This endpoint is public, so any
+  // role it accepts is a role anyone on the internet can give themselves.
+  // Admins are created by the seed or by an existing admin, never by sign-up.
+  @ApiProperty({
+    example: 'VISITOR',
+    description: 'User role',
+    enum: ['HOST', 'VISITOR'],
+    required: false
   })
   @IsOptional()
-  @IsEnum(['ADMIN', 'HOST', 'VISITOR'], { message: 'Invalid user role. Must be ADMIN, HOST, or VISITOR' })
-  role?: 'ADMIN' | 'HOST' | 'VISITOR';
+  @IsIn(['HOST', 'VISITOR'], { message: 'Invalid user role. Must be HOST or VISITOR' })
+  role?: 'HOST' | 'VISITOR';
 }
