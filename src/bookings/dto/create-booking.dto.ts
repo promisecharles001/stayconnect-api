@@ -4,6 +4,7 @@ import {
   IsNotEmpty,
   IsDateString,
   IsNumber,
+  IsOptional,
   Min,
 } from 'class-validator';
 
@@ -23,8 +24,17 @@ export class CreateBookingDto {
   @IsNotEmpty()
   endDate: string;
 
-  @ApiProperty({ example: 300000.00, description: 'Total booking amount' })
+  // Accepted only so app versions that still send it aren't rejected by the
+  // whitelist validator. The server IGNORES it and prices the stay itself —
+  // trusting it let a visitor book any property for ₦1.
+  @ApiProperty({
+    example: 300000.0,
+    required: false,
+    deprecated: true,
+    description: 'Ignored. The server computes the total from the nightly price and dates.',
+  })
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  totalAmount: number;
+  totalAmount?: number;
 }

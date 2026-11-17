@@ -7,7 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { USER_SAFE_SELECT } from './users.select';
+import { USER_SAFE_SELECT, USER_PUBLIC_SELECT } from './users.select';
 import { PasswordUtil } from '../common/utils/password.util';
 import { PaginationUtil, PaginatedResult } from '../common/utils/pagination.util';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -118,10 +118,19 @@ export class UsersService {
     return PaginationUtil.createResult(users as unknown as UserResponseDto[], total, { page, limit });
   }
 
-  async findOne(id: string): Promise<UserResponseDto> {
+  /**
+   * With no viewer (internal callers) or when the viewer is the user
+   * themself or an admin, returns the full safe profile. Anyone else gets
+   * the public profile only — see USER_PUBLIC_SELECT for why.
+   */
+  async findOne(
+    id: string,
+    viewer?: { id: string; roleName?: string },
+  ): Promise<UserResponseDto> {
+    const fullAccess = !viewer || viewer.id === id || viewer.roleName === 'ADMIN';
     const user = await this.prisma.user.findUnique({
       where: { id },
-      select: USER_SAFE_SELECT,
+      select: fullAccess ? USER_SAFE_SELECT : USER_PUBLIC_SELECT,
     });
 
     if (!user) {

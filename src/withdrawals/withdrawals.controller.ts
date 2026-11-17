@@ -94,8 +94,11 @@ export class WithdrawalsController {
   @Get(':id')
   @ApiOperation({ summary: 'Get withdrawal by ID' })
   @ApiParam({ name: 'id', description: 'Withdrawal ID', type: 'string' })
-  async findOne(@Param('id', ParseUUIDPipe) id: string): Promise<WithdrawalResponseDto> {
-    return this.withdrawalsService.findOne(id);
+  async findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: { id: string; role?: { name?: string } },
+  ): Promise<WithdrawalResponseDto> {
+    return this.withdrawalsService.findOne(id, { id: user.id, roleName: user.role?.name });
   }
 
   @Patch(':id/process')

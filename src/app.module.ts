@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD, APP_FILTER, APP_PIPE } from '@nestjs/core';
 
 // Configuration
@@ -28,6 +29,7 @@ import { WishlistModule } from './wishlist/wishlist.module';
 // Guards & Filters
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { HttpThrottlerGuard } from './common/guards/http-throttler.guard';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 import { createValidationPipe } from './common/pipes/validation.pipe';
 
@@ -42,6 +44,20 @@ import { createValidationPipe } from './common/pipes/validation.pipe';
 
     // Scheduled tasks (booking auto-completion, etc)
     ScheduleModule.forRoot(),
+
+    // Rate limiting. Default: RATE_LIMIT_MAX requests per RATE_LIMIT_TTL
+    // seconds per client IP (100 per 60s unless configured). Auth and upload
+    // routes set tighter limits with @Throttle.
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => [
+        {
+          name: 'default',
+          ttl: Number(config.get('RATE_LIMIT_TTL') ?? 60) * 1000,
+          limit: Number(config.get('RATE_LIMIT_MAX') ?? 100),
+        },
+      ],
+    }),
 
     // Database
     PrismaModule,
@@ -64,6 +80,12 @@ import { createValidationPipe } from './common/pipes/validation.pipe';
     WishlistModule,
   ],
   providers: [
+    // Global rate limit — first, so it also covers public routes and
+    // requests that fail authentication (e.g. password guessing).
+    {
+      provide: APP_GUARD,
+      useClass: HttpThrottlerGuard,
+    },
     // Global JWT Guard (with @Public() decorator support)
     {
       provide: APP_GUARD,

@@ -101,7 +101,9 @@ export class UsersController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get user by ID' })
+  @ApiOperation({
+    summary: 'Get user by ID (full profile for yourself or an admin; public profile otherwise)',
+  })
   @ApiParam({ name: 'id', description: 'User ID', type: 'string' })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -114,8 +116,9 @@ export class UsersController {
   })
   async findOne(
     @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: { id: string; role?: { name?: string } },
   ): Promise<UserResponseDto> {
-    return this.usersService.findOne(id);
+    return this.usersService.findOne(id, { id: user.id, roleName: user.role?.name });
   }
 
   @Patch(':id')

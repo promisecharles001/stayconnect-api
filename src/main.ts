@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { Logger } from '@nestjs/common';
@@ -12,8 +13,13 @@ import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 const logger = new Logger('Bootstrap');
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const configService = app.get(ConfigService);
+
+  // Render terminates TLS at one proxy in front of the app. Trust exactly
+  // that hop so req.ip is the real client address — otherwise the rate
+  // limiter sees every user as the proxy's IP and they all share one limit.
+  app.set('trust proxy', 1);
 
   // Security middleware
   app.use(helmet.default());

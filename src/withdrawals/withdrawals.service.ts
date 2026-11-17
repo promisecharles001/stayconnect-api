@@ -155,12 +155,22 @@ export class WithdrawalsService {
     );
   }
 
-  async findOne(id: string): Promise<WithdrawalResponseDto> {
+  /**
+   * A withdrawal carries the host's bank name, account number and account
+   * name, so only that host or an admin may read it. Anyone else gets the
+   * same 404 as a missing id, so the response doesn't confirm it exists.
+   */
+  async findOne(
+    id: string,
+    viewer: { id: string; roleName?: string },
+  ): Promise<WithdrawalResponseDto> {
     const withdrawal = await this.prisma.withdrawalRequest.findUnique({
       where: { id },
     });
 
-    if (!withdrawal) {
+    const allowed =
+      !!withdrawal && (withdrawal.hostId === viewer.id || viewer.roleName === 'ADMIN');
+    if (!withdrawal || !allowed) {
       throw new NotFoundException('Withdrawal request not found');
     }
 

@@ -70,8 +70,10 @@ export class AuthService {
     // Hash password
     const hashedPassword = await PasswordUtil.hash(password);
 
-    // Determine role — default to VISITOR if not provided or invalid
-    const roleName = role && ['ADMIN', 'HOST', 'VISITOR'].includes(role) ? role : 'VISITOR';
+    // Determine role — default to VISITOR if not provided or invalid. ADMIN
+    // is never assignable through public sign-up, even if validation is
+    // bypassed (e.g. a caller that skips the DTO).
+    const roleName = role && ['HOST', 'VISITOR'].includes(role) ? role : 'VISITOR';
     const assignedRole = await this.prisma.role.findUnique({
       where: { name: roleName },
     });
